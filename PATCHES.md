@@ -1,6 +1,6 @@
 # Engine changes and attribution
 
-GyroStrata reconstructs [official Strata](https://github.com/Niko1221/Strata) at a0116b2782a5b82622358c04a06496485d12b2d6, then applies patches/strata.patch. The full diff changes **47 files** (including tests): **3,583 added lines and 75 removed lines**, plus a binary Git hunk. Every resulting changed file is hashed in pins.json.
+GyroStrata reconstructs [official Strata](https://github.com/Niko1221/Strata) at v0.1.45 (477ac13cbe8e582c20484871ce459d20d82df09d), then applies patches/strata.patch. The full diff changes **48 files** (including tests): **3,541 added lines and 80 removed lines**. Every resulting changed file is hashed in pins.json.
 
 ## Imported compatibility
 
@@ -16,9 +16,11 @@ The unchanged [agentionai llama.cpp](https://github.com/agentionai/llama.cpp) de
 - **Read merging:** STRATA_IO_MERGE_GAP_KIB exposes the read-gap tradeoff; the selected default remains 1024 KiB.
 - **Conversation caching:** explicit tail retention and a near-tail checkpoint reduce rereading when returning to a long prompt. Memory pressure can still evict checkpoints.
 - **Suffix policy:** STRATA_LOOKUP_REPROBE_ROUNDS=128 refreshes stale verification costs after expert placement warms; a regression covers an initially unprofitable window.
-- **Scheduling/build:** per-request pool-task tuning and the reviewed MSVC WAITPKG guard. UMWAIT stays off.
+- **Scheduling/build:** per-request pool-task tuning. UMWAIT (now in upstream Strata) stays off.
+- **Blackwell trellis decode:** the CUDA trellis decoder reads its bytes directly; CUDA 13.2 before Update 2 miscompiled the `uint16_t*` form for sm_100 and newer (issue #1).
+- **ISA guard:** tools/check_isa_guard.py knows the trellis AVX-512/AVX2 files, so the upstream wide-ISA check covers them.
 
-Supporting readers, packing changes and regression tests are part of the diff. The binary hunk is intentional: the pinned original expert_source.cpp contained a literal NUL. Do not reformat the patch.
+Supporting readers, packing changes and regression tests are part of the diff. Regenerate it with `git add -A && git diff --cached --binary --full-index <revision>` and do not reformat it.
 
 ## Configuration and tools
 

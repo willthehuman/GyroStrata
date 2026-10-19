@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d89dd7ccc6 100644
+index d900326e3dd139104a7726a0eb8f5f492a8e8677..285cded94ecfdafc53d4e158ad146de81ed4f1c2 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -1,6 +1,6 @@
@@ -11,7 +11,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
  # `strata-pack` are added when their sources exist - a target with no sources would make the build graph
  # claim something the tree does not have, which is worse than an absent target.
  #
-@@ -1131,6 +1131,10 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
+@@ -1329,6 +1329,10 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
    target_include_directories(split_ring_test PRIVATE include)
    add_test(NAME split_ring_test COMMAND split_ring_test)
    # the serve loop's conversation-cache retention policy (header-only, no library to link)
@@ -22,7 +22,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
    add_executable(conv_cache_test src/program/conv_cache_test.cpp)
    target_include_directories(conv_cache_test PRIVATE include)
    add_test(NAME conv_cache_test COMMAND conv_cache_test)
-@@ -1161,7 +1165,7 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
+@@ -1359,7 +1363,7 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
  endif()
  
  add_library(strata_kernels_cpu STATIC src/kernels/cpu/expert.cpp src/kernels/cpu/pool.cpp
@@ -31,28 +31,29 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
  target_include_directories(strata_kernels_cpu PUBLIC include)
  # Plan v0.3 P6: only the kernel files get the AVX-512 / AVX2 flags; the pool and the probe run on any x86-64,
  # and the engine picks the kernels at run time (cpu_avx512_ok).
-@@ -1268,12 +1272,16 @@ if(STRATA_NATIVE_EXPERTS)
-   # one-pass static linking has no cycle to resolve)
+@@ -1467,7 +1471,8 @@ if(STRATA_NATIVE_EXPERTS)
    target_sources(strata_kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp src/kernels/cpu/iq_avx512.cpp
                                             src/kernels/cpu/iq_avx2.cpp src/kernels/cpu/kq_avx2.cpp
--                                           src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/q2_avx1.cpp src/kernels/cpu/iq_avx1.cpp)
-+                                           src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/q2_avx1.cpp
-+                                           src/kernels/cpu/iq_avx1.cpp src/kernels/cpu/tq_cpu.cpp
-+                                           src/kernels/cpu/tq_avx2.cpp src/kernels/cpu/tq_avx512.cpp)
+                                            src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/q2_avx1.cpp src/kernels/cpu/iq_avx1.cpp
+-                                           src/kernels/cpu/nvfp4_avx512.cpp src/kernels/cpu/nvfp4_avx2.cpp)
++                                           src/kernels/cpu/nvfp4_avx512.cpp src/kernels/cpu/nvfp4_avx2.cpp
++                                           src/kernels/cpu/tq_cpu.cpp src/kernels/cpu/tq_avx2.cpp src/kernels/cpu/tq_avx512.cpp)
    target_include_directories(strata_kernels_cpu PRIVATE third_party/ggml)
    if(MSVC)
-     set_source_files_properties(src/kernels/cpu/iq_avx512.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
+     set_source_files_properties(src/kernels/cpu/iq_avx512.cpp src/kernels/cpu/nvfp4_avx512.cpp
+@@ -1475,6 +1480,8 @@ if(STRATA_NATIVE_EXPERTS)
      set_source_files_properties(src/kernels/cpu/iq_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
      set_source_files_properties(src/kernels/cpu/kq_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+     set_source_files_properties(src/kernels/cpu/nvfp4_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
 +    set_source_files_properties(src/kernels/cpu/tq_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
 +    set_source_files_properties(src/kernels/cpu/tq_avx512.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX512")
      # the router lookahead's AVX1 dot (older CPUs; called behind cpu_avx1_ok): no FMA, no 256-bit integer ops
      set_source_files_properties(src/kernels/cpu/kq_avx1.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
      # the older CPUs' Q2_0 rows and activation quantizer (q2_avx1.cpp, issue #1699): 128-bit integer lanes,
-@@ -1286,6 +1294,10 @@ if(STRATA_NATIVE_EXPERTS)
-                                 "-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;-mavx512vnni;-mavx512vbmi;-mf16c;-mfma")
+@@ -1488,6 +1495,10 @@ if(STRATA_NATIVE_EXPERTS)
      set_source_files_properties(src/kernels/cpu/iq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
      set_source_files_properties(src/kernels/cpu/kq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
+     set_source_files_properties(src/kernels/cpu/nvfp4_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
 +    # the trellis kernels: AVX2 + FMA, and AVX-512 F/BW/VL/VBMI/VNNI (exactly what cpu_avx512_ok() checks)
 +    set_source_files_properties(src/kernels/cpu/tq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
 +    set_source_files_properties(src/kernels/cpu/tq_avx512.cpp PROPERTIES COMPILE_OPTIONS
@@ -60,7 +61,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
      set_source_files_properties(src/kernels/cpu/kq_avx1.cpp PROPERTIES COMPILE_OPTIONS "-mavx")
      # the older CPUs' Q2_0 rows and activation quantizer (q2_avx1.cpp, issue #1699): SSE4.2 + AVX with
      # AVX2/FMA/F16C explicitly off, so a -march=native build host cannot leak AVX2 code into the file that
-@@ -1346,6 +1358,12 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1551,6 +1562,12 @@ if(STRATA_NATIVE_EXPERTS)
      add_test(NAME q8k_quant_parity_avx COMMAND ${CMAKE_COMMAND} -E env STRATA_FORCE_ISA=avx $<TARGET_FILE:q8k_quant_parity>)
    endif()
    set(_strata_mmq_types q2_0 iq2_xxs iq2_xs iq2_s iq3_xxs iq3_s iq4_nl iq4_xs q8_0)
@@ -73,7 +74,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
    # #296: OrcaRouter Q4_K_S's Q5_0 experts (Q4_K and Q5_1 come with STRATA_MMQ_KQUANTS on CUDA, S5's branch)
    if(STRATA_ORCA_Q4KS_MMQ)
      list(APPEND _strata_mmq_types q5_0)
-@@ -1394,6 +1412,9 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1690,6 +1707,9 @@ if(STRATA_NATIVE_EXPERTS)
      if(STRATA_ORCA_Q4KS_MMQ)
        target_compile_definitions(strata_mmq PRIVATE STRATA_ORCA_Q4KS_MMQ=1)
      endif()
@@ -83,7 +84,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
      target_link_libraries(strata_prefill PUBLIC strata_mmq)
      target_compile_definitions(strata_prefill PUBLIC STRATA_PREFILL_MMQ=1 STRATA_PREFILL_FUSED=1)
      if(STRATA_BUILD_TESTS)
-@@ -1457,6 +1478,9 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1777,6 +1797,9 @@ if(STRATA_NATIVE_EXPERTS)
      if(STRATA_ORCA_Q4KS_MMQ)
        target_compile_definitions(strata_mmq PRIVATE STRATA_ORCA_Q4KS_MMQ=1)
      endif()
@@ -93,7 +94,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
      target_link_libraries(strata_mmq PUBLIC ggml-base hip::host roc::hipblas)
      target_link_libraries(strata_prefill PUBLIC strata_mmq)
      target_compile_definitions(strata_prefill PUBLIC STRATA_PREFILL_MMQ=1 STRATA_PREFILL_FUSED=1)
-@@ -1490,7 +1514,8 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1825,7 +1848,8 @@ if(STRATA_NATIVE_EXPERTS)
    if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      add_executable(native_expert_parity src/kernels/native_expert_parity.cpp)
      target_include_directories(native_expert_parity PRIVATE ${_strata_gpu_include_directories})
@@ -103,7 +104,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
      add_executable(native_expert_bench src/kernels/native_expert_bench.cpp)
      target_include_directories(native_expert_bench PRIVATE ${_strata_gpu_include_directories})
      target_link_libraries(native_expert_bench PRIVATE strata_kernels strata_kernels_cpu strata_artifact ${_strata_gpu_runtime_target})
-@@ -1518,6 +1543,16 @@ if(STRATA_NATIVE_EXPERTS)
+@@ -1864,6 +1888,16 @@ if(STRATA_NATIVE_EXPERTS)
          set_tests_properties(native_expert_parity_${_name} PROPERTIES TIMEOUT 120)
        endforeach()
        add_test(NAME native_expert_parity_q5_1_min COMMAND native_expert_parity --q5_1-min)
@@ -120,7 +121,7 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
        # #290: the BF16 token embedding (--embd-gguf) gathered and dequantized bit for bit
        add_test(NAME native_expert_parity_bf16_embd COMMAND native_expert_parity --bf16-embd)
      endif()
-@@ -1571,6 +1606,22 @@ if(STRATA_BUILD_TESTS)
+@@ -1917,6 +1951,22 @@ if(STRATA_BUILD_TESTS)
      set_tests_properties(q2_bitplane_parity PROPERTIES ENVIRONMENT "STRATA_Q2_BITPLANE=1")
    endif()
  
@@ -144,10 +145,10 @@ index 0f6426a45f3e12903bdf2e1aec00bbd9b6506635..03289f760b28808d8f027f1a4f2cf5d8
    target_link_libraries(expert_parity PRIVATE strata_kernels_cpu)
    # The pack is a REQUIRED input, not an optional one: this test compares against a real expert blob, and a
 diff --git a/include/strata/artifact/gguf_reader.hpp b/include/strata/artifact/gguf_reader.hpp
-index 1be014326159589588c31151cd2711161636b5c3..2a985b59fbb7eb64ab9cb07ec7f1f6ec1c84c591 100644
+index 7e646a4b1536246c3e72ace125f768d337d050db..5b67f54ba7f0948929379f3ea13f1052ba14bf22 100644
 --- a/include/strata/artifact/gguf_reader.hpp
 +++ b/include/strata/artifact/gguf_reader.hpp
-@@ -112,6 +112,15 @@ inline const char* ggml_type_name(uint32_t t) {
+@@ -115,6 +115,15 @@ inline const char* ggml_type_name(uint32_t t) {
          return "Q1_0";
      case 42:
          return "Q2_0";
@@ -163,7 +164,7 @@ index 1be014326159589588c31151cd2711161636b5c3..2a985b59fbb7eb64ab9cb07ec7f1f6ec
      default:
          return "?";
      }
-@@ -214,6 +223,24 @@ inline bool block_geometry(uint32_t t, int& elems, int& bytes) {
+@@ -225,6 +234,24 @@ inline bool block_geometry(uint32_t t, int& elems, int& bytes) {
          elems = 64;
          bytes = 18;
          return true;
@@ -247,28 +248,28 @@ index 0000000000000000000000000000000000000000..7ab5f56580cc85265d0845cf0add92e1
 +};
 +}
 diff --git a/include/strata/core/expert_source.hpp b/include/strata/core/expert_source.hpp
-index 5d16d997714fdb6a3f80999add97519accbe53f0..99529948271e3e72244946583a28624706a60644 100644
+index 4850b8b6a8744580efe5dcf016cb0ea0e4a733a6..fc994fcb63a685c4462bf68076f595f31f124d56 100644
 --- a/include/strata/core/expert_source.hpp
 +++ b/include/strata/core/expert_source.hpp
-@@ -467,6 +467,8 @@ struct ExpertDispatch {
-     /// Plan v0.3 P6: decayed routing counts per (layer, expert) during decode (sized by the caller; empty = off),
-     /// which the driver uses to swap the most-routed missing experts into the VRAM tier between rounds.
-     std::vector<float> usage;
+@@ -579,6 +579,8 @@ struct ExpertDispatch {
+     /// whose routed ids all look resident there publishes no activation (doorbell_publish_res) - counted
+     const int32_t* dres_check = nullptr;
+     int64_t stale_x = 0;
 +    std::vector<float>* ram_heat = nullptr;  ///< request-local counts, never decayed; host pool only
 +
      int64_t multi_misses = 0;      ///< distinct (layer, expert) pairs the CPU computed in verify windows
      int64_t multi_entries = 0;     ///< routed (token, expert) entries the CPU served in verify windows
      /// Multi-GPU: the second GPU's tier.  Its experts are computed there instead of on the CPU (kind 2).
-@@ -627,6 +629,9 @@ public:
-     int64_t commit_flip();
+@@ -748,6 +750,9 @@ public:
+     void set_foresight_swap(ForesightSwap* fs) { fs_swap_.store(fs, std::memory_order_release); }
      /// The compact copy's blob of `(layer, expert)`, or null; not counted as a read (any thread).
      const uint8_t* resident_blob(int64_t layer, int64_t expert) const;
 +    // Only between requests after every CPU job and GPU/adaptive copy has finished.
 +    // Replaces cold same-layer RAM blobs with hot file-tier blobs without growing RAM.
 +    int64_t rebalance_ram(const std::vector<int32_t>& gpu, const std::vector<float>& heat, int limit);
      int64_t exchanges() const { return exchanges_; }
-     bool exchange_rotation() const { return exchange_storage_.active(); }
-     uint64_t rotated_exchanges() const { return exchange_storage_.exchanges(); }
+     /// STRATA_RAM_ADAPT: the compact copy gives `out`'s place to `in`, read from the file, so the RAM tier can follow
+     /// the conversation as the VRAM tier does.  Both are experts of `layer` (one blob size), `out` is held by the copy
 diff --git a/include/strata/core/peer_experts.hpp b/include/strata/core/peer_experts.hpp
 index a6e3766a9a24b2714692f374e1fd37110c8a1e12..cd9d53bd3f92aa77fe447fc361624b800eec2f86 100644
 --- a/include/strata/core/peer_experts.hpp
@@ -283,7 +284,7 @@ index a6e3766a9a24b2714692f374e1fd37110c8a1e12..cd9d53bd3f92aa77fe447fc361624b80
      int64_t launched_rows_ = 0;
      bool launched_direct_ = false;
 diff --git a/include/strata/core/remote_experts.hpp b/include/strata/core/remote_experts.hpp
-index d499c0315e904c9609f664e567895bc2ead2171b..4e3be387e458fd4453a1fcbb777c3af28f7c95e8 100644
+index 115d1dc8fbbbc7d9af28e67fcd33edf41b1ce8aa..ed24d17fbe426ec225bf8cb8cea6ad32483cfc97 100644
 --- a/include/strata/core/remote_experts.hpp
 +++ b/include/strata/core/remote_experts.hpp
 @@ -87,6 +87,9 @@ private:
@@ -297,10 +298,10 @@ index d499c0315e904c9609f664e567895bc2ead2171b..4e3be387e458fd4453a1fcbb777c3af2
      void* d_meta_ = nullptr;  ///< one contiguous upload of grouped indices, instead of five small copies
      int32_t* d_start_ = nullptr;
 diff --git a/include/strata/core/verify.hpp b/include/strata/core/verify.hpp
-index ffaea0591789be866b75c8f6acb089a214d782b5..4253776d644cf784e492f197bcbfa229a44bf55b 100644
+index a73872361a66ce3593a5e9925fc1bb943c00bb7d..e6ff842b50e020d667d8cb4f0eb59bcf0580668a 100644
 --- a/include/strata/core/verify.hpp
 +++ b/include/strata/core/verify.hpp
-@@ -516,6 +516,10 @@ private:
+@@ -608,6 +608,10 @@ private:
      static constexpr int64_t kPcieGroupRows = 4;                  // the PCIe call's groups side by side (of <= 16)
      uint8_t* hit_xq_ = nullptr;
      uint8_t* nat_xq_ = nullptr;   // plan v0.3 P6: q8_1 activations for a native pack's grouped experts
@@ -383,13 +384,13 @@ index 0000000000000000000000000000000000000000..43b3fcfce0481b84076f6ea2a17ab792
 +
 +}  // namespace strata::kernels::cpu
 diff --git a/include/strata/kernels/cpu/native_expert.hpp b/include/strata/kernels/cpu/native_expert.hpp
-index c41a1991bfe634b6dd11ef59b1808142f64cd6dd..8ac64304e311d277fb1c68cd35687892164e5b88 100644
+index 895f90c20b14de6bf5327010664c94584ed87abb..fbac350522a17cecabb50e2777e7602efcfae8c7 100644
 --- a/include/strata/kernels/cpu/native_expert.hpp
 +++ b/include/strata/kernels/cpu/native_expert.hpp
-@@ -27,6 +27,12 @@ struct NativeFmt {
-     size_t up_off = 0, down_off = 0;    ///< inside the blob
-     size_t bytes = 0;                   ///< the whole blob
-     size_t act_bytes = 0, h_bytes = 0;  ///< quantized activation sizes (n_embd of gu_act, n_ff of d_act)
+@@ -32,6 +32,12 @@ struct NativeFmt {
+     /// projection's FP32 output: gate * s_gate, up * s_up, down * s_down. Do not fold s_down into up: the hidden
+     /// drops to ~1e-5 and its q8 block scale becomes an FP16 subnormal (expert error 2-12% instead of 1.1%).
+     size_t tail_off = 0;
 +    /// prism.hadamard (hadamard.hpp): the experts of this layer are stored in a rotated basis, and
 +    /// native_quant_act / native_quant_h apply y = H_block (signs * x) before quantizing.  had_block 0 = none.
 +    int had_block = 0;
@@ -397,9 +398,9 @@ index c41a1991bfe634b6dd11ef59b1808142f64cd6dd..8ac64304e311d277fb1c68cd35687892
 +    const float* gu_signs = nullptr;    ///< n_embd signs for x (nullptr: identity)
 +    const float* d_signs = nullptr;     ///< n_ff signs for h (nullptr: identity)
  };
- 
- /// Whether this build has the ggml-cpu path.
-@@ -34,9 +40,9 @@ bool native_experts_available() noexcept;
+ constexpr int kNvfp4Type = 40;
+ constexpr size_t kNvfp4Tail = 16;
+@@ -41,9 +47,9 @@ bool native_experts_available() noexcept;
  /// Fills `f` for a layer; false (with a reason) when ggml-cpu has no dot product for a type.
  bool native_fmt(int gu_type, int d_type, int64_t n_embd, int64_t n_ff, NativeFmt& f, std::string& err);
  
@@ -412,10 +413,10 @@ index c41a1991bfe634b6dd11ef59b1808142f64cd6dd..8ac64304e311d277fb1c68cd35687892
  
  /// From how many tokens native_gu_rows gives this gate/up type to a multi-token kernel (#152; ggml-cpu's per-token dot
 diff --git a/include/strata/kernels/cpu/pool.hpp b/include/strata/kernels/cpu/pool.hpp
-index 6796e39173a0015ff7e397b71a6b3170415897ec..3023f6987893f5d5765a98c122e7716b97a67a04 100644
+index 686abd6e6aef7b496da63901cdcbf229f47839e2..c591bcc61acf0f25528471ae2871e9c491e35b99 100644
 --- a/include/strata/kernels/cpu/pool.hpp
 +++ b/include/strata/kernels/cpu/pool.hpp
-@@ -158,6 +158,9 @@ public:
+@@ -162,6 +162,9 @@ public:
      ExpertPool& operator=(const ExpertPool&) = delete;
  
      int workers() const { return n_; }
@@ -512,13 +513,13 @@ index 0000000000000000000000000000000000000000..6f5f83e0990f699af01b4e164ca68493
 +
 +}  // namespace strata::kernels::cpu
 diff --git a/include/strata/kernels/iq_kernels.hpp b/include/strata/kernels/iq_kernels.hpp
-index bd7599f7beaf6f3f4a93d4d70c4ab8070f58b3a3..f72cc2e69a1dd4dcbcc55fe62a9ac9f388fa0983 100644
+index 44e706bb0bb40478f57a696f763ed7e466100e93..959bc3b122dead57d3572b76eec09e7b750a1b6a 100644
 --- a/include/strata/kernels/iq_kernels.hpp
 +++ b/include/strata/kernels/iq_kernels.hpp
-@@ -44,6 +44,10 @@ struct NativeExpertLayout {
-     size_t gu_row = 0, d_row = 0;       // bytes per row
+@@ -48,6 +48,10 @@ struct NativeExpertLayout {
      size_t up_off = 0, down_off = 0;    // byte offsets inside the blob
      size_t bytes = 0;                   // the whole blob
+     size_t tail_off = 0;                // NVFP4: {s_gate, s_up, s_down, 0} at the blob's end; 0 = none
 +    // APR (prism.hadamard): the down weights are Hadamard-folded, so native_expert_grouped rotates h before
 +    // quantizing it (hadamard_rows).  had_block 0 = none; d_signs is a DEVICE vector of n_ff signs or nullptr.
 +    int had_block = 0;
@@ -526,11 +527,10 @@ index bd7599f7beaf6f3f4a93d4d70c4ab8070f58b3a3..f72cc2e69a1dd4dcbcc55fe62a9ac9f3
  };
  NativeExpertLayout native_expert_layout(int gu_type, int d_type, int64_t n_embd, int64_t n_ff);
  /// Whether `native_expert_grouped` has kernels for this gate/up and down type pair at these dimensions, and the
-@@ -79,6 +83,16 @@ void native_grouped_set_v1(bool v1);
- /// The bench only: the AMD kernel layout (STRATA_EXP_MODE values; -1 = the environment's) and the phase
- /// (0 all, 1 gate/up + SwiGLU + quantize, 2 down).
- void native_expert_set_mode(int mode, int phase);
-+
+@@ -105,6 +109,15 @@ void native_expert_set_expdec_params(const NativeExpertExpdecParams& p);
+ NativeExpertExpdecParams native_expert_expdec_params();
+ /// Whether EXPDEC has kernels for this layout's gate/up and down (the bench's check).
+ bool native_expert_expdec_takes(const NativeExpertLayout& L, bool& gu, bool& down);
 +/// APR (prism.hadamard): y = H_block (signs * x) per block of `block` values of each of `rows` rows of `width`
 +/// (x == y allowed).  `signs`: a device vector of `width` signs, or nullptr (identity).  The same floats as the CPU's
 +/// hadamard_rotate.  The f16 form rotates in place, computing in float.
@@ -544,7 +544,7 @@ index bd7599f7beaf6f3f4a93d4d70c4ab8070f58b3a3..f72cc2e69a1dd4dcbcc55fe62a9ac9f3
  /// true selects the older kernels that decode it again per column (STRATA_OLD_IQ_MMVQ=1 at startup).  Both give
  /// bitwise the same results.  Set before graph capture; captured graphs keep the kernels they captured.
 diff --git a/include/strata/program/conv_cache.hpp b/include/strata/program/conv_cache.hpp
-index 07c23adead9921fdd6c04313d4bda7bed2339c0c..e6462a2490cbbbd37ad020044907b712f1edcd60 100644
+index d8e97f32c810aa6c1b1f5b8b5560891e77fdcc94..62f78bbbdf74620f42417ed66e350e2030982152 100644
 --- a/include/strata/program/conv_cache.hpp
 +++ b/include/strata/program/conv_cache.hpp
 @@ -58,7 +58,10 @@ inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, con
@@ -572,10 +572,10 @@ index 09c06d74d24f37195e6181a952be2b062e98a001..ac6bea8afae5b08f45c5228a8bd798fa
  
  }  // namespace strata::spec
 diff --git a/serve/server.py b/serve/server.py
-index ff1b935c359fc5c66c28644c4b16c1a6b140a465..db60ce4f7a42b62e814b883430937235dc65dac0 100644
+index 2e805773dc56788bfe2f899bc7a78f20bd6db553..814fbadad9bd30b0874c34d2f0f8dfe2f59e78a3 100644
 --- a/serve/server.py
 +++ b/serve/server.py
-@@ -1025,6 +1025,9 @@ class StrataEngine:
+@@ -1199,6 +1199,9 @@ class StrataEngine:
          # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
          tune = sampling.get("strata_tune")
          if isinstance(tune, dict):
@@ -586,7 +586,7 @@ index ff1b935c359fc5c66c28644c4b16c1a6b140a465..db60ce4f7a42b62e814b883430937235
                  v = tune.get(k)
                  if isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= float(v) <= 1.0:
 diff --git a/src/core/expert_source.cpp b/src/core/expert_source.cpp
-index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920e9308697 100644
+index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f8f161653 100644
 --- a/src/core/expert_source.cpp
 +++ b/src/core/expert_source.cpp
 @@ -1,5 +1,6 @@
@@ -596,16 +596,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
  #include "strata/core/foresight_swap.hpp"
  #include "strata/core/on_device.hpp"
  #include "strata/platform/aux_cpus.hpp"
-@@ -1721,7 +1722,7 @@ bool FileExpertSource::drop_mapping(std::string& why) {
-     // Linux's page cache has no such lock: only the tests close the GGUF views (STRATA_TEST_UNMAP_GGUF=1), to run the
-     // unmapped path the Windows file tier takes
-     const char* t = std::getenv("STRATA_TEST_UNMAP_GGUF");
--    if (t == nullptr || t[0] == ' ' || std::atoi(t) == 0 || role_ptr_.empty()) { why = "not Windows"; return false; }
-+    if (t == nullptr || t[0] == '\0' || std::atoi(t) == 0 || role_ptr_.empty()) { why = "not Windows"; return false; }
-     if (direct_.empty()) { why = "the reads are not unbuffered"; return false; }
-     if (unmapped_) { why = "already closed"; return true; }
-     for (Map& m : maps_) {
-@@ -1857,7 +1858,17 @@ bool FileExpertSource::read_direct(const Fill* fills, size_t n) const {
+@@ -1904,7 +1905,17 @@ bool FileExpertSource::read_direct(const Fill* fills, size_t n) const {
      // maps the GGUF shards for the token embedding and the PLE table): measured on a PCIe 5 drive, 512 KiB reads at
      // queue depth 48 make 10.4 GB/s on a file nobody maps and 3.4 GB/s on a mapped one, 8 MiB reads 8.6 GB/s.  So
      // windows less than kGap apart (the same role of nearby experts) are merged into requests of up to kMerge bytes.
@@ -624,7 +615,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
      struct Window { int file; uint64_t a0, size, skip, n, at; uint8_t* dst; size_t req; uint64_t in_req; };
      struct Req { HANDLE h; uint64_t a0, size, pos; };
      // this thread's aligned buffer and events, kept for its next batch
-@@ -3390,6 +3401,43 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
+@@ -3530,6 +3541,43 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
      return resident_blob(index);   // through the rotation's ownership table when STRATA_EXCHANGE_ROTATE is on
  }
  
@@ -668,7 +659,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
  const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
      if (io_pf_ && role_ptr_.empty() && direct_.empty()) {
          if (complement_ready_ && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
-@@ -3661,6 +3709,9 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -3820,6 +3868,9 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
      if (!d.usage.empty())
          for (int64_t i = 0; i < n_tok * k; ++i)
              if (ids[i] >= 0 && ids[i] < d.n_expert) d.usage[(size_t) d.layers * (size_t) d.n_expert + (size_t) ids[i]] += 1.0f;
@@ -678,7 +669,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
      // ---- plan v0.3 P6: the GPU's share, decided and published FIRST so the GPU starts while the CPU works.
      // Distinct experts in routing order; resident ones and the last pcie_num/256 of the missed ones go to the GPU.
      const int64_t n = n_tok * k;
-@@ -3840,6 +3891,10 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4012,6 +4063,10 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
          }
      }
      const auto c2 = std::chrono::steady_clock::now();
@@ -689,7 +680,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
      if (any_cpu) {   // CS-T: the experts the CPU computes, fetched together (the GGUF in place reads them on several threads)
          static thread_local std::vector<int64_t> miss;
          miss.clear();
-@@ -3847,9 +3902,29 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4019,9 +4074,29 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
              if (kind[i] == -1 && ids[i] >= 0 && ids[i] < d.n_expert &&
                  std::find(miss.begin(), miss.end(), (int64_t) ids[i]) == miss.end())
                  miss.push_back(ids[i]);
@@ -722,7 +713,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
      for (int64_t t = 0; t < n_tok; ++t)
          for (int64_t j = 0; j < k; ++j) {
              const int64_t i = t * k + j;
-@@ -3862,6 +3937,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4034,6 +4109,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                  d.fail_expert = e;
                  return;
              }
@@ -730,7 +721,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
              if (kind[i] == -2) {            // STRATA_ROUTE_TAIL_SKIP: a skipped tail expert contributes zero
                  std::memset(row, 0, (size_t) H * sizeof(float));
                  ++d.tail_skipped;
-@@ -3878,6 +3954,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4050,6 +4126,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                      std::memset(row, 0, (size_t) H * sizeof(float));
                  continue;
              }
@@ -738,7 +729,7 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
              ++d.cache_refused;
              int16_t& jo = d.job_of[(size_t) e];
              if (jo < 0) {
-@@ -3902,6 +3979,17 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4074,6 +4151,17 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
              ++jb.nt;
              ++d.multi_entries;
          }
@@ -754,9 +745,9 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
 +    } else prepare_jobs(-1);
 +    if (d.failed) return;
      const auto c3 = std::chrono::steady_clock::now();
+     if (d.plan != nullptr) d.plan->cpu_jobs = njobs;
      pt("run", njobs);
-     if (njobs > 0) {
-@@ -3930,13 +4018,13 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4103,13 +4191,13 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
      auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
      d.ms_plan += ms(c0, c1);
      d.ms_actq += ms(c1, c2);
@@ -774,18 +765,18 @@ index ad28f56f840ebf656386fe6036fdcf894a50b497..3a008de4b46f5f9d2e62dedf03ae8920
      d.experts += n_tok * k;
  }
 diff --git a/src/core/peer_experts.cpp b/src/core/peer_experts.cpp
-index 6c8f567e62bbf39274975a1812ff9bb8e5a5379c..5a2164ca130b8e87fd4693d72326c2726c2a1e9d 100644
+index ee0c2d0c3e50c0efb75f7266ce366bdc287616d7..0320b75e518a4b4c0b64db0f77134f7e6fc8b7f1 100644
 --- a/src/core/peer_experts.cpp
 +++ b/src/core/peer_experts.cpp
-@@ -2,6 +2,7 @@
- #include "strata/core/peer_experts.hpp"
+@@ -3,6 +3,7 @@
  
+ #include "strata/core/device.hpp"   // primary_device() (STRATA_PRIMARY_DEVICE)
  #include "strata/kernels/cpu/expert_layout.hpp"
 +#include "strata/kernels/cpu/hadamard.hpp"
  #include "strata/kernels/elementwise.hpp"
  #include "strata/kernels/iq_kernels.hpp"
  #include "strata/kernels/quantize_act.hpp"
-@@ -73,6 +74,7 @@ void PeerExperts::close() {
+@@ -114,6 +115,7 @@ void PeerExperts::close() {
      d_x_ = d_out_ = h_x_ = h_out_ = nullptr;
      d_meta_ = h_meta_ = d_scratch_ = nullptr;
      d_q8_ = nullptr;
@@ -793,7 +784,7 @@ index 6c8f567e62bbf39274975a1812ff9bb8e5a5379c..5a2164ca130b8e87fd4693d72326c272
      stream_ = refill_ = nullptr;
      refill_ev_ = nullptr;
      device_ = -1;
-@@ -131,6 +133,10 @@ bool PeerExperts::open(int device, const std::vector<std::pair<int32_t, int32_t>
+@@ -181,6 +183,10 @@ bool PeerExperts::open(int device, const std::vector<std::pair<int32_t, int32_t>
          ck(cudaMalloc((void**) &d_q8_, (size_t) CAP * (H / 32) * 36), "activations", err) &&
          ck(cudaMalloc(&d_scratch_, scratch), "scratch", err);
      if (!alloc_ok) { close(); return false; }
@@ -804,7 +795,7 @@ index 6c8f567e62bbf39274975a1812ff9bb8e5a5379c..5a2164ca130b8e87fd4693d72326c272
  
      // the pairs the primary does not hold, in rank order, as many as fit
      size_t free_b = 0, total_b = 0;
-@@ -234,9 +240,12 @@ bool PeerExperts::launch(int64_t layer, const float* x, const int32_t* ids, int6
+@@ -284,9 +290,12 @@ bool PeerExperts::launch(int64_t layer, const float* x, const int32_t* ids, int6
      Meta* dm = (Meta*) d_meta_;
      const auto& lay = strata::kernels::cpu::expert_layout();
      if (lay.native) {
@@ -820,10 +811,10 @@ index 6c8f567e62bbf39274975a1812ff9bb8e5a5379c..5a2164ca130b8e87fd4693d72326c272
                                                 d_scratch_, d_out_, s);
      } else {
 diff --git a/src/core/remote_experts.cpp b/src/core/remote_experts.cpp
-index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee1bd31c37 100644
+index 7148cf74ed4febade2447b0ab64d9a30b157d164..6e684959557155a113f85612952170d55b97626b 100644
 --- a/src/core/remote_experts.cpp
 +++ b/src/core/remote_experts.cpp
-@@ -2,6 +2,7 @@
+@@ -3,6 +3,7 @@
  #include "strata/core/remote_expert_opt.hpp"
  
  #include "strata/kernels/cpu/expert_layout.hpp"
@@ -831,7 +822,7 @@ index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee
  #include "strata/kernels/iq_kernels.hpp"
  #include "strata/kernels/quantize_act.hpp"
  #include "strata/kernels/s2_expert_grouped.hpp"
-@@ -100,6 +101,7 @@ void RemoteExperts::close() {
+@@ -106,6 +107,7 @@ void RemoteExperts::close() {
          if (d_out_) cudaFree(d_out_);
          if (d_q8_) cudaFree(d_q8_);
          if (d_scales_) cudaFree(d_scales_);
@@ -839,7 +830,7 @@ index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee
          if (d_scratch_) cudaFree(d_scratch_);
          if (d_meta_) cudaFree(d_meta_);
          if (h_x_) cudaFreeHost(h_x_);
-@@ -115,6 +117,8 @@ void RemoteExperts::close() {
+@@ -121,6 +123,8 @@ void RemoteExperts::close() {
      h_meta_ = d_meta_ = nullptr;
      d_q8_ = nullptr;
      d_scales_ = nullptr;
@@ -848,7 +839,7 @@ index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee
      d_scratch_ = nullptr;
      d_start_ = d_dst_ = d_tok_ = d_count_ = nullptr;
      d_ptr_ = nullptr;
-@@ -206,12 +210,18 @@ bool RemoteExperts::open(int device, int slots, int64_t layers, int64_t experts,
+@@ -213,12 +217,18 @@ bool RemoteExperts::open(int device, int slots, int64_t layers, int64_t experts,
          check(cudaMalloc((void**) &d_q8_, (size_t) CAP * (H / 32) * 36), "activation", err, device) &&
          check(cudaMalloc((void**) &d_scales_, (size_t) CAP * (H / 32) * sizeof(float)), "activation scales", err, device) &&
          check(cudaMalloc(&d_scratch_, scratch), "scratch", err, device) &&
@@ -868,7 +859,7 @@ index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee
      // Zero-copy: the helper reads its input from, and writes its compact rows into, the pinned host buffers
      // directly - two copies fewer per layer, each of which is a PCIe round trip.  STRATA_REMOTE_ZEROCOPY=0 copies.
      const char* zc = std::getenv("STRATA_REMOTE_ZEROCOPY");
-@@ -312,9 +322,15 @@ bool RemoteExperts::begin(int64_t layer, const float* x, const int32_t* ids, int
+@@ -319,9 +329,15 @@ bool RemoteExperts::begin(int64_t layer, const float* x, const int32_t* ids, int
      if (!staged) return false;
      const auto& lay = strata::kernels::cpu::expert_layout();
      if (lay.native) {
@@ -886,10 +877,10 @@ index 9af13abfb288cbf53cee387e88ae7f934eb90d26..6a5de9bf4816198de196e3f4cb44b2ee
                                                 groups_, (int64_t) dst_.size(), d_q8_, d_scratch_, zero_copy_ && !reduce ? z_out_ : d_out_, s);
      } else {
 diff --git a/src/core/verify.cpp b/src/core/verify.cpp
-index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e8dc782ee 100644
+index 64ffc92a26434be647cd8e9dd44dd5d0865ca793..44db6fb31970cdf8c504666c4f34b78efdf69a6a 100644
 --- a/src/core/verify.cpp
 +++ b/src/core/verify.cpp
-@@ -14,6 +14,7 @@
+@@ -22,6 +22,7 @@
  #include "strata/core/peer_experts.hpp"
  #include "strata/kernels/iq_kernels.hpp"
  #include "strata/kernels/cpu/expert_layout.hpp"
@@ -897,7 +888,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
  #include "strata/kernels/bf16_gemv.hpp"
  #include "strata/kernels/native_router.hpp"
  #include "strata/kernels/native_moe.hpp"
-@@ -644,6 +645,13 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
+@@ -755,6 +756,13 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
          sink_.ctx = this;
      }
  
@@ -911,7 +902,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
      // ---- the device arena: the same sequence counted, then carved
      auto carve = [&](Bump& b) {
          tok_ = b.take<int32_t>(T); step_ = b.take<int32_t>(T * strata::kernels::kStepCount);
-@@ -672,6 +680,7 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
+@@ -783,6 +791,7 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
          staging_ = b.take<uint8_t>((uint64_t) kStagingBlobs * strata::kernels::cpu::expert_layout().max_blob);
          hit_xq_ = b.take<uint8_t>(T * (N / 32) * 34); hit_xs_ = b.take<float>(T * (N / 32));
          nat_xq_ = b.take<uint8_t>(T * (N / 32) * 36);
@@ -919,7 +910,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
          hit_scratch_ = b.take<uint8_t>(std::max<uint64_t>(
              strata::kernels::moe_hit_grouped_scratch_bytes((int64_t) (T * K), g.n_embd, g.n_ff),
              strata::kernels::native_expert_scratch_bytes((int64_t) (T * K), g.n_ff)));
-@@ -724,6 +733,10 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
+@@ -842,6 +851,10 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
              return false;
          }
      }
@@ -930,7 +921,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
      sink_.staging = (unsigned long long) staging_;
      sink_.staging_cap = kStagingBlobs;
      (void) TS;
-@@ -1541,8 +1554,17 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
+@@ -1926,8 +1939,17 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
              if (sh_fork) cudaEventRecord(ev_join_, sh_cs_);
          }
          if (strata::kernels::cpu::expert_layout().native) {
@@ -950,7 +941,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
          } else
              quantize_q8_0_scaled(xm, hit_xq_ + (size_t) tb * (N / 32) * 34, hit_xs_ + (size_t) tb * (N / 32), (int64_t) n * N, cs);
          stamp(l, 18, grp);
-@@ -1578,7 +1600,8 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
+@@ -1963,7 +1985,8 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
              if (lay.native) {
                  // the layer's GGUF formats (i-quant gate/up, Q2_0 / IQ4_NL down)
                  const auto& f = lay.fmt[(size_t) l];
@@ -961,7 +952,7 @@ index 3995ae9dd136d41c3cf390fcbb5bb84bfd2a7e23..e1cd266835bb307454dc35945503b77e
                                        nat_xq_ + (size_t) tb * (N / 32) * 36, hit_scratch_, dst_buf, cs, gy);
              } else {
 diff --git a/src/kernels/cpu/expert_layout.cpp b/src/kernels/cpu/expert_layout.cpp
-index d8adb260f4d505b83153cb4cc5678fc613416945..ced2293c34367bbdde45eb69ca65f53d4b448192 100644
+index 001fa5d47cdc0a3cad42ebac0859b9f93b2ebbce..b6924950da9a992ae35a3f6162e0d8bc6376a218 100644
 --- a/src/kernels/cpu/expert_layout.cpp
 +++ b/src/kernels/cpu/expert_layout.cpp
 @@ -1,5 +1,6 @@
@@ -971,7 +962,7 @@ index d8adb260f4d505b83153cb4cc5678fc613416945..ced2293c34367bbdde45eb69ca65f53d
  
  #include <atomic>
  #include <cstdio>
-@@ -383,6 +384,7 @@ bool expert_layout_load(const std::string& pack_dir, int64_t n_layers, int64_t n
+@@ -391,6 +392,7 @@ bool expert_layout_load(const std::string& pack_dir, int64_t n_layers, int64_t n
      std::ifstream in(pack_dir + "/native_experts.txt");
      if (!in) {
          L.total = (uint64_t) n_layers * (uint64_t) n_expert * (uint64_t) BLOB;
@@ -979,7 +970,7 @@ index d8adb260f4d505b83153cb4cc5678fc613416945..ced2293c34367bbdde45eb69ca65f53d
          g_layout = L;
          return true;
      }
-@@ -479,6 +481,48 @@ bool expert_layout_load(const std::string& pack_dir, int64_t n_layers, int64_t n
+@@ -487,6 +489,48 @@ bool expert_layout_load(const std::string& pack_dir, int64_t n_layers, int64_t n
          at += L.bytes[(size_t) l] * (uint64_t) L.n_expert;
      }
      L.total = at;
@@ -1145,27 +1136,27 @@ index 0000000000000000000000000000000000000000..3a9fc0c7fc234b4c4d293d946c3afaf6
 +
 +}  // namespace strata::kernels::cpu
 diff --git a/src/kernels/cpu/native_expert.cpp b/src/kernels/cpu/native_expert.cpp
-index 78e3cbaa0e2f0fe00fe931569e1a7a473db0cbcb..182c347829e5985e9a37ca58f6c5dbc7f44d794c 100644
+index c6cab9fd7d58a990008fbee416fcd56e14803bf3..bdbd12002910d38c43b02822c1c5385036261b46 100644
 --- a/src/kernels/cpu/native_expert.cpp
 +++ b/src/kernels/cpu/native_expert.cpp
-@@ -8,6 +8,8 @@
- #include "strata/kernels/cpu/iq_avx1.hpp"
- #include "strata/kernels/cpu/kq_avx2.hpp"
+@@ -10,6 +10,8 @@
+ #include "strata/kernels/cpu/nvfp4_avx2.hpp"
+ #include "strata/kernels/cpu/nvfp4_avx512.hpp"
  #include "strata/kernels/cpu/expert_layout.hpp"
 +#include "strata/kernels/cpu/hadamard.hpp"
 +#include "strata/kernels/cpu/tq_cpu.hpp"
  
  #include "ggml.h"
  #include "ggml-cpu.h"
-@@ -15,6 +17,7 @@
- #include <cmath>
+@@ -19,6 +21,7 @@
  #include <cstdlib>
+ #include <cstring>
  #include <mutex>
 +#include <vector>
  
  namespace strata::kernels::cpu {
  namespace {
-@@ -101,12 +104,24 @@ bool q8k_avx1(int type) {
+@@ -111,12 +114,24 @@ bool q8k_avx1(int type) {
  }  // namespace
  
  void native_quant_act(const NativeFmt& f, const float* x, void* dst) {
@@ -1190,7 +1181,7 @@ index 78e3cbaa0e2f0fe00fe931569e1a7a473db0cbcb..182c347829e5985e9a37ca58f6c5dbc7
      if (q8k_avx2(f.d_act)) { q8k_quant_avx2(h, dst, f.n_ff); return; }
      if (q8k_avx1(f.d_act)) { q8k_quant_avx1(h, dst, f.n_ff); return; }
      traits(f.d_act)->from_float(h, dst, f.n_ff);
-@@ -164,6 +179,12 @@ void native_gu_rows(const NativeFmt& f, const uint8_t* blob, const void* const*
+@@ -190,6 +205,12 @@ void native_gu_rows(const NativeFmt& f, const uint8_t* blob, const void* const*
          kq256_gu_rows(f.gu_type, blob, f.gu_row, f.up_off, (int) f.n_embd, act, nt, ff, r0, r1);
          return;
      }
@@ -1203,7 +1194,7 @@ index 78e3cbaa0e2f0fe00fe931569e1a7a473db0cbcb..182c347829e5985e9a37ca58f6c5dbc7
      // A format with only an AVX-2 kernel (IQ4_XS, #415) takes it on AVX-2 CPUs only: an AVX-512 CPU keeps ggml-cpu for
      // it, as before (its rows would round differently).  Each kernel only for the formats it implements: falling
      // through an empty switch would leave ff unwritten instead of falling back to ggml-cpu.
-@@ -206,6 +227,10 @@ void native_down_rows(const NativeFmt& f, const uint8_t* blob, const void* const
+@@ -257,6 +278,10 @@ void native_down_rows(const NativeFmt& f, const uint8_t* blob, const void* const
      // Both multi-token kernels below are /arch:AVX2 translation units (kq_avx2.cpp and iq_avx2.cpp),
      // so a CPU without AVX2 has to reach ggml-cpu's vec_dot instead - same reasoning as the gate/up
      // rows above, where `avx512` tested cpu_avx512_ok() and `avx2` did not.
@@ -1533,92 +1524,10 @@ index 0000000000000000000000000000000000000000..1708288865d2c7b8d5b6de67bc47be55
 +    return rc;
 +}
 diff --git a/src/kernels/cpu/pool.cpp b/src/kernels/cpu/pool.cpp
-index af1eb5a59b8eb66a862a91210930e66bbc0793f1..08ecac5b70bf1a80a4f863c6fc229cd149f6ffe2 100644
+index 9641ba6a97c1fad2af43301beb5794bed50eec09..49829fa9d0cdfdf4857ff9a15158be2f414797a6 100644
 --- a/src/kernels/cpu/pool.cpp
 +++ b/src/kernels/cpu/pool.cpp
-@@ -9,6 +9,9 @@
- #include <cmath>
- #include <chrono>
- #include <immintrin.h>
-+#if defined(_MSC_VER)
-+#include <intrin.h>
-+#endif
- 
- #include <cstdio>
- #include <cstdlib>
-@@ -27,6 +30,41 @@
- namespace strata::kernels::cpu {
- 
- namespace {
-+// STRATA_POOL_UMWAIT=<TSC cycles> (experimental, x86 WAITPKG only): a parked worker waits with UMONITOR/UMWAIT on the
-+// epoch's cache line instead of spinning on _mm_pause.  It wakes when the host publishes (a write to that line) or
-+// after the cycles, in the light C0.1 state; on a laptop the CPU then gives back the power the spin took, which the
-+// GPU's share of the budget gets.  0 or unset (or no WAITPKG): the spin, unchanged.  STRATA_POOL_UMWAIT_C02=1: the
-+// deeper C0.2 state (slower wake).  MSVC x64 only for now (the intrinsics need no target flag there); other builds spin.
-+uint64_t umwait_cycles() {
-+    static const uint64_t c = [] {
-+        const char* e = std::getenv("STRATA_POOL_UMWAIT");
-+        if (e == nullptr || std::atoll(e) <= 0) return (uint64_t) 0;
-+#if defined(_MSC_VER) && defined(_M_X64) && !defined(__clang__)   // MSVC proper: clang-cl (the Windows HIP build) has no WAITPKG intrinsics by default
-+        int r[4] = {0, 0, 0, 0};
-+        __cpuidex(r, 7, 0);
-+        if (((r[2] >> 5) & 1) == 0) {
-+            std::fprintf(stderr, "strata: STRATA_POOL_UMWAIT: this CPU has no WAITPKG, the workers spin\n");
-+            return (uint64_t) 0;
-+        }
-+        std::fprintf(stderr, "strata: STRATA_POOL_UMWAIT: parked workers wait with UMWAIT (%lld cycles)\n", std::atoll(e));
-+        return (uint64_t) std::atoll(e);
-+#else
-+        return (uint64_t) 0;
-+#endif
-+    }();
-+    return c;
-+}
-+unsigned umwait_state() {
-+    static const unsigned s = [] { const char* e = std::getenv("STRATA_POOL_UMWAIT_C02"); return e && *e == '1' ? 0u : 1u; }();
-+    return s;   // 1 = C0.1 (light), 0 = C0.2
-+}
-+// STRATA_POOL_UMWAIT_ESC=<TSC cycles> (experimental): an escalating wait - C0.1 for the first cycles of a park, C0.2 after
-+// (a wait that has lasted that long is a GPU phase, a draft or a prompt read, where a slower wake costs little).
-+uint64_t umwait_escalate() {
-+    static const uint64_t c = [] { const char* e = std::getenv("STRATA_POOL_UMWAIT_ESC"); return e ? (uint64_t) (std::max)(0LL, std::atoll(e)) : (uint64_t) 0; }();
-+    return c;
-+}
-+
- constexpr uint64_t pack_head(uint32_t epoch, uint32_t n, uint32_t i) {
-     return ((uint64_t) epoch << 32) | ((uint64_t) n << 16) | (uint64_t) i;
- }
-@@ -509,10 +547,27 @@ void ExpertPool::worker(int id) {
-         // every 1024 pauses, so the spin itself is unchanged.
-         const auto parked_at = std::chrono::steady_clock::now();
-         uint32_t spins = 0;
-+        const uint64_t um = umwait_cycles();
-+#if defined(_MSC_VER) && defined(_M_X64) && !defined(__clang__)   // MSVC proper: clang-cl (the Windows HIP build) has no WAITPKG intrinsics by default
-+        const uint64_t um_esc = umwait_escalate();
-+        const uint64_t um_t0 = um != 0 && um_esc != 0 ? __rdtsc() : 0;
-+#endif
-         while (epoch_.load(std::memory_order_acquire) == seen) {
-             if (stop_.load(std::memory_order_relaxed)) return;
--            _mm_pause();
--            if ((++spins & 1023u) != 0) continue;
-+#if defined(_MSC_VER) && defined(_M_X64) && !defined(__clang__)   // MSVC proper: clang-cl (the Windows HIP build) has no WAITPKG intrinsics by default
-+            if (um != 0) {   // STRATA_POOL_UMWAIT: wake on the publish's write to epoch_, or after `um` cycles
-+                _umonitor((void*) &epoch_);
-+                if (epoch_.load(std::memory_order_acquire) != seen) break;
-+                const uint64_t now = __rdtsc();
-+                const unsigned st = um_esc != 0 ? (now - um_t0 < um_esc ? 1u : 0u) : umwait_state();
-+                _umwait(st, now + um);
-+                if ((++spins & 15u) != 0) continue;   // each wait is ~um cycles: look at the clock more often
-+            } else
-+#endif
-+            {
-+                _mm_pause();
-+                if ((++spins & 1023u) != 0) continue;
-+            }
-             if (std::chrono::steady_clock::now() - parked_at < spin_before_sleep_) continue;
-             std::unique_lock<std::mutex> lk(sleep_mu_);
-             wstate_[(size_t) id].store(kSleeping, std::memory_order_relaxed);
-@@ -715,6 +770,11 @@ void ExpertPool::run_split(ExpertJob* jobs, int n) {
+@@ -795,6 +795,11 @@ void ExpertPool::run_split(ExpertJob* jobs, int n) {
      ms_drain_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
  }
  
@@ -1631,10 +1540,10 @@ index af1eb5a59b8eb66a862a91210930e66bbc0793f1..08ecac5b70bf1a80a4f863c6fc229cd1
      return tasks_ == 0 ? 3 * (n_ + (host_works_ ? 1 : 0)) : (int) (std::min)(rows, (int64_t) tasks_);
  }
 diff --git a/src/kernels/cpu/pool_tasks_test.cpp b/src/kernels/cpu/pool_tasks_test.cpp
-index e08cf262bfbe2a3724ac701ea048c9d97296c7fb..0713f581904df5ff092b19588ed464740efa18d1 100644
+index dbb5e754a8787d75a6d0cc94ad7a34dcc05ea9b4..e43f7e0d3a8be48aab256c115f5986e8a68bf3e9 100644
 --- a/src/kernels/cpu/pool_tasks_test.cpp
 +++ b/src/kernels/cpu/pool_tasks_test.cpp
-@@ -70,8 +70,13 @@ int main(int argc, char** argv) {
+@@ -72,8 +72,13 @@ int main(int argc, char** argv) {
          for (float v : ref) if (!std::isfinite(v)) return 1;
          for (bool host : {false, true}) for (int workers : {1, 3})
              for (int tasks : {0, 1, 41, 128, 192, 256, cpu::ExpertPool::kMaxTasks}) {
@@ -2722,10 +2631,10 @@ index 0000000000000000000000000000000000000000..bb4eaa7a1d1906ee8bce1203b1ec52ee
 +
 +}  // namespace strata::kernels::cpu::tq_detail
 diff --git a/src/kernels/cuda/iq_kernels.cu b/src/kernels/cuda/iq_kernels.cu
-index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aebfbe7a38a 100644
+index 3334d8404407b1441dbe6415281c61a8e6a05e82..a3ed9803e79464a0857c3ca35dd4d0d231dbff11 100644
 --- a/src/kernels/cuda/iq_kernels.cu
 +++ b/src/kernels/cuda/iq_kernels.cu
-@@ -15,10 +15,16 @@
+@@ -17,10 +17,16 @@
  #define GGML_COMMON_DECL_CUDA
  #define GGML_COMMON_IMPL_CUDA
  #include "ggml-common.h"
@@ -2742,8 +2651,8 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  #include <type_traits>
  
  namespace strata::kernels {
-@@ -567,6 +573,97 @@ __device__ __forceinline__ float vec_dot_q8_0_q8_1(const void* __restrict__ vbq,
-     return d8_0 * d8_1 * ((float) sumi);
+@@ -601,6 +607,101 @@ __device__ __forceinline__ float vec_dot_nvfp4_q8_1(const void* __restrict__ vbq
+     return sum;
  }
  
 +// ---------------------------------------------------------------- APR trellis types (ggml 144 TQ2_T, 145 TQK6, 146 TQK7)
@@ -2762,14 +2671,18 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
 +    a = make_float2(tq_h2f(pa & 0xFFFFu), tq_h2f(pa >> 16));
 +    b = make_float2(tq_h2f(pb & 0xFFFFu), tq_h2f(pb >> 16));
 +}
-+// the states of steps 4l..4l+3 of one block (qs is 2-byte aligned: every trellis block has an even size)
++// little-endian u16 word i of qs from two byte loads.  qs is read as bytes only: through a uint16_t* (an aliasing
++// violation), CUDA 13.2's NVVM before 13.2.86 dropped the `& 0xFF` of b2 below and corrupted every fourth TQ2_T
++// state on Blackwell (GyroStrata issue 1: native_expert_parity's dequant gate, rel 3.1e-1)
++__device__ __forceinline__ uint32_t tq_word16(const uint8_t* qs, int i) {
++    return (uint32_t) qs[2 * i] | ((uint32_t) qs[2 * i + 1] << 8);
++}
++// the states of steps 4l..4l+3 of one block
 +template<int TY>
 +__device__ __forceinline__ void tq_states4(const uint8_t* qs, int l, uint32_t s[4]) {
-+    const uint16_t* qs16 = (const uint16_t*) qs;
 +    if constexpr (TY == 144) {   // s_t = qs[(t + 31) % 32] << 8 | qs[t]
-+        const uint32_t w01 = qs16[2 * l + 0], w23 = qs16[2 * l + 1];
++        const uint32_t b0 = qs[4 * l + 0], b1 = qs[4 * l + 1], b2 = qs[4 * l + 2], b3 = qs[4 * l + 3];
 +        const uint32_t prev = qs[(4 * l + 31) & 31];
-+        const uint32_t b0 = w01 & 0xFF, b1 = w01 >> 8, b2 = w23 & 0xFF, b3 = w23 >> 8;
 +        s[0] = (prev << 8) | b0;
 +        s[1] = (b0 << 8) | b1;
 +        s[2] = (b1 << 8) | b2;
@@ -2782,8 +2695,8 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
 +        const int wi1 = wb + 1 >= nwords ? wb + 1 - nwords : wb + 1;
 +        const int wi2 = wb + 2 >= nwords ? wb + 2 - nwords : wb + 2;
 +        const int wi3 = wb + 3 >= nwords ? wb + 3 - nwords : wb + 3;
-+        const uint64_t v = (uint64_t) qs16[wb] | ((uint64_t) qs16[wi1] << 16) | ((uint64_t) qs16[wi2] << 32) |
-+                           ((uint64_t) qs16[wi3] << 48);
++        const uint64_t v = (uint64_t) tq_word16(qs, wb) | ((uint64_t) tq_word16(qs, wi1) << 16) |
++                           ((uint64_t) tq_word16(qs, wi2) << 32) | ((uint64_t) tq_word16(qs, wi3) << 48);
 +#pragma unroll
 +        for (int i = 0; i < 4; ++i) s[i] = (uint32_t) (v >> (r + (3 - i) * K)) & 0xFFFFu;
 +    }
@@ -2840,7 +2753,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  // ---------------------------------------------------------------- the formats
  // qk = values per block, ipb = dot calls per block (qi / vdr), step = the iqs stride between calls.
  template<int TY> struct Fmt;
-@@ -604,16 +701,23 @@ template<> struct Fmt<6> { static constexpr int qk = 32, ipb = QI5_0 / VDR_Q5_0,
+@@ -638,21 +739,28 @@ template<> struct Fmt<6> { static constexpr int qk = 32, ipb = QI5_0 / VDR_Q5_0,
      __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_q5_0_q8_1(v, y, kbx, iqs); } };
  template<> struct Fmt<8> { static constexpr int qk = 32, ipb = QI8_0 / VDR_Q8_0, step = VDR_Q8_0;
      __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_q8_0_q8_1(v, y, kbx, iqs); } };
@@ -2855,21 +2768,27 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  // The formats of each role, one list each so a type cannot be in one switch and missing from another.  Every
  // entry is a kernel template for each CUDA architecture of the build, hence two lists rather than one.
  #ifdef STRATA_Q6K_EXPERTS   // opt-in build (-DSTRATA_Q6K_EXPERTS=ON): one more instance per kernel, loaded at start
--#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8)
-+#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8) X(144) X(145)
+-#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8) X(40)
++#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8) X(40) X(144) X(145)
  #else
--#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8)
-+#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8) X(144) X(145)
+-#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8) X(40)
++#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8) X(40) X(144) X(145)
  #endif
--#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8)
--#define STRATA_MMVQ_FMTS(X) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8)
-+#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(144) X(146)
-+#define STRATA_MMVQ_FMTS(X) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8) X(144) X(145) X(146)
+ // Q5_K / Q6_K downs: Qwen3.6-35B-A3B (FF 512, whole 256-blocks per row); Flash-Next's FF 640 never selects them
+ #ifdef STRATA_Q6K_EXPERTS
+-#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(14) X(40)
++#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(14) X(40) X(144) X(146)
+ #else
+-#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(40)
++#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(40) X(144) X(146)
+ #endif
+-#define STRATA_MMVQ_FMTS(X) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8) X(40)
++#define STRATA_MMVQ_FMTS(X) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8) X(40) X(144) X(145) X(146)
+ template<> struct Fmt<40> { static constexpr int qk = 64, ipb = 2, step = 4;     // NVFP4: 2 calls of 32 values
+     __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_nvfp4_q8_1(v, y, kbx, iqs); } };
  
- __device__ __forceinline__ float warp_sum(float v) {
- #pragma unroll
-@@ -963,6 +1067,21 @@ template<> struct Split<42> {   // Q2_0
-         return r.d2 * d8 * sumi;
+@@ -1098,6 +1206,21 @@ template<> struct Split<40> {   // NVFP4: vec_dot_nvfp4_q8_1's two 16-value sub-
+         return sum;
      }
  };
 +// APR trellis types: the lane's 16 decoded codebook values (tq_load / tq_apply above)
@@ -2890,7 +2809,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  
  // One row against the n <= NC activations x + off[0..n) (n >= 1, warp-uniform; offsets in q8_1 blocks, 32-bit to
  // spare registers), the whole warp.  Per activation this is row_dot: the same calls k, lane-strided the same way,
-@@ -1251,7 +1370,7 @@ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned lon
+@@ -1441,7 +1564,7 @@ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned lon
      const uint32_t* s_grid = stage_iq_grid<TG, STAGE_GRID>(s_grid_buf, threadIdx.x, 256);
      const int nb = (int) (L.n_embd / Fmt<TG>::qk), xb = (int) (L.n_embd / 32);
      if constexpr (SUB16) {
@@ -2899,7 +2818,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
              const int subwarp = threadIdx.x >> 4, t = threadIdx.x & 15;
              const int row = blockIdx.x * 16 + subwarp;            // 0 .. 2*n_ff
              if (row >= 2 * L.n_ff) return;
-@@ -1327,6 +1446,34 @@ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned lon
+@@ -1521,6 +1644,34 @@ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned lon
      }
  }
  
@@ -2934,8 +2853,8 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  __global__ void swiglu_entries_kernel(const float* __restrict__ gate, const float* __restrict__ up, float* __restrict__ h,
                                        long long n) {
      const long long i = (long long) blockIdx.x * blockDim.x + threadIdx.x;
-@@ -1868,6 +2015,27 @@ __device__ void dq_bf16(const void* vx, int64_t ibs, dst_t* yy, int tid) {
-     for (int j = 0; j < 8; ++j) yy[tid * 8 + j] = cvt<dst_t>(__uint_as_float((uint32_t) x[j] << 16));
+@@ -2452,6 +2603,27 @@ __device__ void dq_nvfp4(const void* vx, int64_t ibs, dst_t* yy, int tid) {
+     }
  }
  
 +// APR trellis types: one 256-value call = two 128-blocks; thread tid decodes block tid/16, lane (tid/2)%8, steps
@@ -2962,7 +2881,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  // Every type below must also be in is_iq() (BF16: embed_type_supported): the host entry points refuse the others,
  // so the default is unreachable.
  template<typename dst_t>
-@@ -1885,15 +2053,16 @@ __device__ __forceinline__ void dq_dispatch(int ty, const void* vx, int64_t ibs,
+@@ -2469,9 +2641,7 @@ __device__ __forceinline__ void dq_dispatch(int ty, const void* vx, int64_t ibs,
          case 42: dq_q2_0(vx, ibs, y, tid); break;
          case 12: dq_q4_k(vx, ibs, y, tid); break;
          case 13: dq_q5_k(vx, ibs, y, tid); break;
@@ -2973,7 +2892,8 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
          case 7: dq_q5_1(vx, ibs, y, tid); break;
          case 6: dq_q5_0(vx, ibs, y, tid); break;
          case 2: dq_q4_0(vx, ibs, y, tid); break;
-         case 3: dq_q4_1(vx, ibs, y, tid); break;
+@@ -2479,6 +2649,9 @@ __device__ __forceinline__ void dq_dispatch(int ty, const void* vx, int64_t ibs,
+         case 40: dq_nvfp4(vx, ibs, y, tid); break;
          case 8: dq_q8_0(vx, ibs, y, tid); break;
          case 30: dq_bf16(vx, ibs, y, tid); break;
 +        case 144: dq_tq<144>(vx, ibs, y, tid); break;
@@ -2982,19 +2902,20 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
          default: break;
      }
  }
-@@ -1917,9 +2086,9 @@ __global__ void dequant_gu_kernel(int ty, const void* __restrict__ gate, const v
+@@ -2520,9 +2693,10 @@ __global__ void dequant_gu_kernel(int ty, const void* __restrict__ gate, const v
  bool is_iq(int t) {
      return t == 16 || t == 17 || t == 18 || t == 20 || t == 21 || t == 22 || t == 23 || t == 29 || t == 42 || t == 11 ||
  #ifdef STRATA_Q6K_EXPERTS
--           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8;
-+           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 144 || t == 145 || t == 146;
+-           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40;
++           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40 || t == 144 || t == 145 ||
++           t == 146;
  #else
--           t == 12 || t == 13 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8;
-+           t == 12 || t == 13 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 144 || t == 145 || t == 146;
+-           t == 12 || t == 13 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40;
++           t == 12 || t == 13 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40 || t == 144 || t == 145 || t == 146;
  #endif
  }
  // values per block of the types the grouped expert kernels take (0 = none)
-@@ -2667,6 +2836,9 @@ template<int TG>
+@@ -3408,6 +3582,9 @@ template<int TG>
  void launch_gu(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, const int32_t* grp_start,
                 const int32_t* n_groups, const int32_t* ent_tok, const block_q8_1* X, const NativeExpertLayout& L,
                 float* gate, float* up) {
@@ -3004,7 +2925,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
      if constexpr (!kSplit<TG>) native_gu_kernel<TG><<<grid, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
      else if (g_old_kernels) native_gu_kernel<TG><<<grid, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
      else if constexpr (kStageIqGrid<TG>) {
-@@ -2699,7 +2871,8 @@ void iq_set_old_kernels(bool old) { g_old_kernels = old; }
+@@ -3440,7 +3617,8 @@ void iq_set_old_kernels(bool old) { g_old_kernels = old; }
  bool iq_old_kernels() { return g_old_kernels; }
  
  bool iq_supported(int t) noexcept { return is_iq(t); }
@@ -3014,8 +2935,8 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
  
  size_t iq_row_bytes(int t, int64_t n) noexcept {
      switch (t) {
-@@ -2722,6 +2895,9 @@ size_t iq_row_bytes(int t, int64_t n) noexcept {
-         case 3: return (size_t) (n / 32) * sizeof(block_q4_1);
+@@ -3464,6 +3642,9 @@ size_t iq_row_bytes(int t, int64_t n) noexcept {
+         case 40: return (size_t) (n / 64) * sizeof(block_nvfp4);
          case 8: return (size_t) (n / 32) * sizeof(block_q8_0);
          case 30: return (size_t) n * 2;   // BF16: the token embedding only (iq_embed_rows, iq_dequant_f32)
 +        case 144: return (size_t) (n / 128) * sizeof(block_tq2_t);   // APR trellis types
@@ -3024,7 +2945,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
          default: return 0;
      }
  }
-@@ -2787,9 +2963,58 @@ void iq_dequant_gu_f16(int t, const void* gate, const void* up, int64_t n_ff, in
+@@ -3530,9 +3711,58 @@ void iq_dequant_gu_f16(int t, const void* gate, const void* up, int64_t n_ff, in
      check("iq_dequant_gu_f16");
  }
  
@@ -3084,7 +3005,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
             n_embd % 256 == 0 && (n_ff * n_embd) % 256 == 0;
  }
  
-@@ -3491,7 +3716,8 @@ void native_expert_grouped(const NativeExpertLayout& L, const unsigned long long
+@@ -4322,7 +4552,8 @@ void native_expert_grouped(const NativeExpertLayout& L, const unsigned long long
      }
      const bool v1 = g_grouped_v1;
      const int64_t gy = (v1 || grid_groups <= 0 || grid_groups > cap_groups) ? cap_groups : grid_groups;
@@ -3094,7 +3015,7 @@ index c2e44270f5a13c245ebc64e3699db25e84d5f0dd..da2e91f1affd59c57c49c5c566ea1aeb
      const dim3 ggu((unsigned) ((2 * L.n_ff + gu_rows - 1) / gu_rows), (unsigned) gy);
  #if STRATA_EXP_LAYOUTS
  #if defined(STRATA_HIP_GFX906)
-@@ -3570,8 +3796,11 @@ void native_expert_grouped(const NativeExpertLayout& L, const unsigned long long
+@@ -4402,8 +4633,11 @@ void native_expert_grouped(const NativeExpertLayout& L, const unsigned long long
  #else
      const bool sw_v1 = v1;
  #endif
@@ -3251,7 +3172,7 @@ index 0000000000000000000000000000000000000000..ee4fd6099bfb2e13b785b7a26a070241
 +    0xba00, 0xef0b, 0xe13b, 0x1df9, 0x00f3, 0xdb34, 0xe7ed, 0xd863, 0x3d00, 0x16fd, 0xe907, 0x1014, 0xde24, 0xf1de, 0x17ff, 0x20f2,
 +};
 diff --git a/src/kernels/native_expert_parity.cpp b/src/kernels/native_expert_parity.cpp
-index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6c2115192 100644
+index bbb1551a8dcd4d5800206249d64f03b3e889e1f4..848edf53fa020622d8e7872f93d8e3fdef47f205 100644
 --- a/src/kernels/native_expert_parity.cpp
 +++ b/src/kernels/native_expert_parity.cpp
 @@ -3,11 +3,14 @@
@@ -3290,7 +3211,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
  
  #include "ggml.h"
  
-@@ -66,13 +79,17 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
+@@ -73,13 +86,17 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
      std::vector<float> x((size_t) NT * H);
      for (auto& v : x) v = nd(rng);
      std::vector<float> ref((size_t) NT * H), got_c((size_t) NT * H), got_g((size_t) NT * H);
@@ -3309,7 +3230,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          for (int64_t r = 0; r < H; ++r) {
              double o = 0;
              for (int64_t i = 0; i < FF; ++i) o += (double) D[r * FF + i] * h[i];
-@@ -176,6 +193,42 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
+@@ -202,6 +219,42 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
                          gu_diff, dn_diff);
              if (gu_diff || dn_diff) ++failures;
          }
@@ -3352,7 +3273,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          // UD-Q4_K_XL's formats: the multi-token AVX2 kernels (kq_avx2.cpp) against ggml-cpu's vec_dot per token,
          // BIT FOR BIT, for 1..8 tokens; then the time of 4 tokens (a verify window) both ways
          for (int role = 0; role < 2; ++role) {
-@@ -278,7 +331,8 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
+@@ -304,7 +357,8 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
      }
      // (c) the GPU: one group holding the NT entries
      {
@@ -3362,7 +3283,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          void *dblob, *dx, *dxq, *dscr;
          float* dout;
          unsigned long long* dptr;
-@@ -302,6 +356,32 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
+@@ -328,6 +382,32 @@ int check_blob(const cpu::NativeFmt& f, const std::vector<uint8_t>& blob, int se
          cudaMemcpy(dn, &one, 4, cudaMemcpyHostToDevice);
          cudaMemcpy(ddst, idx, NT * 4, cudaMemcpyHostToDevice);
          cudaMemcpy(dtok, idx, NT * 4, cudaMemcpyHostToDevice);
@@ -3395,7 +3316,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          strata::kernels::quantize_q8_1_rows((const float*) dx, NT, H, dxq, s);
          strata::kernels::native_expert_grouped(L, dptr, dstart, dn, ddst, dtok, 1, NT, dxq, dscr, dout, s);
          cudaStreamSynchronize(s);
-@@ -523,6 +603,157 @@ int check_bf16_embd(cudaStream_t s) {
+@@ -554,6 +634,157 @@ int check_bf16_embd(cudaStream_t s) {
      return failures;
  }
  
@@ -3553,7 +3474,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
  }  // namespace
  
  int main(int argc, char** argv) {
-@@ -530,8 +761,12 @@ int main(int argc, char** argv) {
+@@ -561,8 +792,12 @@ int main(int argc, char** argv) {
      if (argc < 2) {
          std::fprintf(stderr, "usage: native_expert_parity <shard.gguf> [layer ...]\n"
                               "       native_expert_parity --synthetic GU/DOWN ...   (ggml type names, e.g. q4_K/q5_1)\n"
@@ -3567,7 +3488,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          return 2;
      }
      // #152's width check tests the opt-in rule (the multi-token kernels from one token on)
-@@ -546,11 +781,24 @@ int main(int argc, char** argv) {
+@@ -577,11 +812,24 @@ int main(int argc, char** argv) {
      cudaStream_t s;
      cudaStreamCreate(&s);
      const std::string mode = argv[1];
@@ -3594,7 +3515,7 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
          for (int i = 2; i < argc; ++i) {
              const std::string arg = argv[i];
              const size_t slash = arg.find('/');
-@@ -564,7 +812,13 @@ int main(int argc, char** argv) {
+@@ -595,7 +843,13 @@ int main(int argc, char** argv) {
                  ++failures;
                  continue;
              }
@@ -3610,20 +3531,20 @@ index 01133fad5452a54117859c7784bc00d6ca6c511b..15c406c380e880098cea2cb50efb19f6
      } else {
          const strata::GgufModel model(strata::gguf_split_paths(argv[1]));
 diff --git a/src/prefill/moe_mmq.cu b/src/prefill/moe_mmq.cu
-index b0446f8ee7fa7f68ac6d1ba707cb6adfbab7438a..3ee0174c61a692195168b86822b8b7a1f536ecee 100644
+index 0d2a5a508ce173f55de6213f12ca85f5067a0227..9b73f828bc0ce7319c690a8ba6bf49154458c9f7 100644
 --- a/src/prefill/moe_mmq.cu
 +++ b/src/prefill/moe_mmq.cu
-@@ -127,6 +127,9 @@ bool supported(int t) {
+@@ -263,6 +263,9 @@ bool supported(int t) {
          case GGML_TYPE_IQ2_XXS: case GGML_TYPE_IQ2_XS: case GGML_TYPE_IQ2_S:
          case GGML_TYPE_IQ3_XXS: case GGML_TYPE_IQ3_S: case GGML_TYPE_IQ4_NL: case GGML_TYPE_IQ4_XS:
          case GGML_TYPE_Q8_0:   // the draft layer's dense matrices (E-9)
 +#ifdef STRATA_MMQ_TQ
 +        case GGML_TYPE_TQ2_T: case GGML_TYPE_TQK6: case GGML_TYPE_TQK7:   // APR experts (agention fork's MMQ)
 +#endif
+             return true;
  #ifdef STRATA_MMQ_KQUANTS
-         case GGML_TYPE_Q4_K: case GGML_TYPE_Q5_K: case GGML_TYPE_Q5_1:   // Unsloth's UD-Q4_K_XL experts (CUDA)
- #if defined(__HIPCC__) || defined(STRATA_Q6K_EXPERTS)
-@@ -213,6 +216,11 @@ void Context::run(const Product& p, void* stream) {
+         // Unsloth's UD-Q4/Q5/Q6_K_XL experts; on HIP also the dense GGUF projections (STRATA_DENSE_MMQ)
+@@ -444,6 +447,11 @@ void Context::run(const Product& p, void* stream) {
          case GGML_TYPE_IQ4_NL: mul_mat_q_case<GGML_TYPE_IQ4_NL>(ctx, a, s); break;
          case GGML_TYPE_IQ4_XS: mul_mat_q_case<GGML_TYPE_IQ4_XS>(ctx, a, s); break;
          case GGML_TYPE_Q8_0: mul_mat_q_case<GGML_TYPE_Q8_0>(ctx, a, s); break;
@@ -3632,14 +3553,14 @@ index b0446f8ee7fa7f68ac6d1ba707cb6adfbab7438a..3ee0174c61a692195168b86822b8b7a1
 +        case GGML_TYPE_TQK6: mul_mat_q_case<GGML_TYPE_TQK6>(ctx, a, s); break;
 +        case GGML_TYPE_TQK7: mul_mat_q_case<GGML_TYPE_TQK7>(ctx, a, s); break;
 +#endif
- #ifdef STRATA_MMQ_KQUANTS
-         case GGML_TYPE_Q4_K: mul_mat_q_case<GGML_TYPE_Q4_K>(ctx, a, s); break;
-         case GGML_TYPE_Q5_K: mul_mat_q_case<GGML_TYPE_Q5_K>(ctx, a, s); break;
+ #if defined(STRATA_MMQ_KQUANTS) && defined(STRATA_KQ_DSO)
+         case GGML_TYPE_Q4_K: case GGML_TYPE_Q5_K: case GGML_TYPE_Q6_K: case GGML_TYPE_Q5_1: {
+             const int e = kq::run((int) t, &a, s);
 diff --git a/src/prefill/prefill.cpp b/src/prefill/prefill.cpp
-index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297dcc242084 100644
+index 17428925eef862d2ae08fbacdf713639337c5259..92e9202acf4df638cafb954c2d438a65227f2e98 100644
 --- a/src/prefill/prefill.cpp
 +++ b/src/prefill/prefill.cpp
-@@ -23,6 +23,7 @@
+@@ -24,6 +24,7 @@
  #include "strata/kernels/native_ple_postops.hpp"
  #include "strata/kernels/iq_kernels.hpp"
  #include "strata/kernels/cpu/expert_layout.hpp"
@@ -3647,7 +3568,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
  #include "strata/kernels/qsa.hpp"
  #include "strata/kernels/kv_stream.hpp"
  #include "strata/kernels/cvec.hpp"
-@@ -659,6 +660,9 @@ struct PeerPrefill {
+@@ -776,6 +777,9 @@ struct PeerPrefill {
      int32_t* host_pair = nullptr;
      std::vector<int32_t> bounds_host;
      core::PinnedRing up_ring;             // #1996: this device's pageable uploads (bounds, routed rows) go up from pinned slots
@@ -3657,7 +3578,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      std::vector<void*> owned;
      int64_t layers = 0, experts = 0, rows = 0, over_cap = 0;   // stats
      ~PeerPrefill() {
-@@ -777,6 +781,7 @@ struct Prefill::Impl {
+@@ -895,6 +899,7 @@ struct Prefill::Impl {
            *shared = nullptr, *sg = nullptr;
      int32_t *ids = nullptr, *slot_dev = nullptr, *src_dev = nullptr;
      uint16_t *Xs = nullptr, *Hh = nullptr, *sh_h = nullptr;
@@ -3665,7 +3586,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      // step 2b (MMQ): the activations quantized per layer, H in FP32 and its group's quantized rows, the identity
      // row map, the group bounds, the group buffers of gathered experts
      void *Xq = nullptr, *Hq = nullptr;
-@@ -860,6 +865,9 @@ struct Prefill::Impl {
+@@ -986,6 +991,9 @@ struct Prefill::Impl {
      std::vector<int32_t> tok_host;
      PinnedUpload tok_up;
      core::PinnedRing up_ring;                // #1996: every other upload of the prompt path whose host side is pageable
@@ -3675,17 +3596,17 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      std::unique_ptr<PeerPrefill> pp;         // multi-GPU: the peer GPU's expert share (set_peer)
      // layer split: the next stage's GPU as a stream-only peer (set_stage_helper); its buffers are that stage's own
      // prompt buffers, bound per prompt, and it takes the place of `pp` for a run it helps
-@@ -1052,6 +1060,9 @@ uint64_t moe_set_bytes(size_t T, int64_t n_expert, bool fused) {
-         a.take<uint8_t>(mb.xq, ok);
-         a.take<float>(mb.h, ok);
+@@ -1226,6 +1234,9 @@ uint64_t moe_set_bytes(size_t T, int64_t n_expert, bool fused) {
          a.take<uint8_t>(mb.hq, ok);
+         a.take<float>(T * K, ok); a.take<float>(T * K, ok); a.take<float>(MMQ_GROUP * 4, ok);
+         a.take<float>(T * K, ok);
 +        // APR: the rotated copy of `mixed` for the MMQ path (carve's m.Xr) - it must be counted here too, or the MoE
 +        // set outgrows the region `carve` sizes from this, and `init` fails with "do not fit" at any chunk
 +        if (strata::kernels::cpu::hadamard_spec().any()) a.take<float>(T * N, ok);
      }
      return a.used;
  }
-@@ -1066,6 +1077,26 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
+@@ -1246,6 +1257,26 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
      if (g.n_embd != N || g.hc != HC || g.hc_lr != LR || g.n_expert < 1 || ss.k != K) {
          err = "prefill: geometry differs from the artifact's"; return false;
      }
@@ -3712,16 +3633,16 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      cudaGetDevice(&m.device);
      if (stage_le_ < 0) stage_le_ = g.n_layers;
      if (stage_lb_ < 0 || stage_lb_ >= stage_le_ || stage_le_ > g.n_layers || (stage_le_ < g.n_layers) != (next_ != nullptr)) {
-@@ -1270,6 +1301,8 @@ bool Prefill::carve(size_t T, void* alloc) {
-             m.Xq = c.take<uint8_t>(mb.xq, ok);
-             m.H = c.take<float>(mb.h, ok);
-             m.Hq = c.take<uint8_t>(mb.hq, ok);
+@@ -1469,6 +1500,8 @@ bool Prefill::carve(size_t T, void* alloc) {
+             m.Xscale = c.take<float>(T * K, ok); m.Hscale = c.take<float>(T * K, ok);
+             m.grp_tail = c.take<float>(MMQ_GROUP * 4, ok);
+             m.row_sd = c.take<float>(T * K, ok);
 +            // APR: the rotated expert input (only for Hadamard-folded packs)
 +            m.Xr = strata::kernels::cpu::hadamard_spec().any() ? c.take<float>(T * N, ok) : nullptr;
          }
          if (base == nullptr) ok = false;
      }
-@@ -1541,6 +1574,20 @@ double split_help_frac(int64_t T) {
+@@ -1748,6 +1781,20 @@ double split_help_frac(int64_t T) {
  }
  }  // namespace
  
@@ -3742,7 +3663,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
  bool Prefill::set_stage_helper(Prefill* helper, std::string& err) {
      Impl& m = *impl_;
      m.help_pp.reset();
-@@ -1574,6 +1621,7 @@ bool Prefill::set_stage_helper(Prefill* helper, std::string& err) {
+@@ -1781,6 +1828,7 @@ bool Prefill::set_stage_helper(Prefill* helper, std::string& err) {
      for (int i = 0; ok && i < kSplitHelpRing; ++i)
          ok = cudaEventCreateWithFlags(&pp->pcopied[(size_t) i], cudaEventDisableTiming) == cudaSuccess &&
               cudaEventCreateWithFlags(&pp->pused[(size_t) i], cudaEventDisableTiming) == cudaSuccess;
@@ -3750,7 +3671,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      cudaSetDevice(prev);
      if (!ok) { err = "prefill: the layer split's prompt help (streams and events)"; return false; }
      helper_ = helper;
-@@ -1740,7 +1788,8 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
+@@ -1952,7 +2000,8 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
      }
      if (pp->sums) {
          const char* v = std::getenv("STRATA_PF_PEER_F16");
@@ -3760,7 +3681,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
          if (pp->f16) pp->sum16 = (uint16_t*) take((size_t) m.T_max * N * 2);
          const char* gv = std::getenv("STRATA_PF_PEER_GATHER");
          pp->gather = gv == nullptr || std::atoi(gv) != 0;
-@@ -1762,6 +1811,7 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
+@@ -1974,6 +2023,7 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
          pp->ctx = std::make_unique<mmq::Context>();
          pp->run_ctx = pp->ctx.get();
          mmq::iota(pp->ident, pp->cap_rows, pp->s);
@@ -3768,7 +3689,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
          ok = cudaStreamSynchronize(pp->s) == cudaSuccess;
      }
      if (ok && !pp->p2p) {   // the host route's mapped buffers, sized for the largest chunk
-@@ -1809,6 +1859,11 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
+@@ -2021,6 +2071,11 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
                   pp->compact ? (pp->ps_frac > 0.0 ? (", compact group buffers, streams " + std::to_string((int) (pp->ps_frac * 100 + 0.5)) +
                                                      "% of the primary's streamed experts through a " + std::to_string(pp->RP) + "-slot ring").c_str()
                                                   : ", compact group buffers") : "", fb >> 20);
@@ -3780,7 +3701,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
      m.pp = std::move(pp);
      return true;
  }
-@@ -2976,14 +3031,23 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -3371,14 +3426,23 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                      // keep MMQ; without the variable nothing here runs.  A native pack's layer takes the native kernels
                      // (moe_fused_iq.hpp) where they cover its two formats, else MMQ (or the FP16 path: IQ1_M).
                      const strata::kernels::cpu::ExpertLayout& lay = strata::kernels::cpu::expert_layout();
@@ -3805,7 +3726,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                      const bool fused_l = (use_mmq && stream_all && no_peer && !lay.native && fused::enabled()) || fused_nat;
                      // #583 / #954: the fused layout's GU/H/Xq hold the grouping tables and the int8 rows, sized for
                      // stream_all_min() - 1 tokens of MMQ's rows, so a layer that takes MMQ or the FP16 path at the FULL
-@@ -3369,9 +3433,16 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -3802,14 +3866,22 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                          const size_t mmq_gub = use_mmq ? mmq::matrix_bytes(mmq_gt, 1280, N) : 0;
                          const size_t mmq_db = use_mmq ? mmq::matrix_bytes(mmq_dt, N, 640) : 0;
                          pt.mark(kPfGather, cs);
@@ -3813,17 +3734,27 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
 +                        // split's helper also take (one rotation for both cards; `mixed` itself feeds the shared expert)
 +                        const float* xsrc = m.mixed;
                          if (use_mmq) {
-                             // step 2b: the layer's activations as q8_1 rows in expert order, straight from `mixed`
--                            mmq::quantize(m.mixed, m.src_dev, m.Xq, mmq_gt, N, N, T * K, m.cs);
+-                            // step 2b: the layer's activations as q8_1 rows in expert order, straight from `mixed`:
+-                            // each token quantized once and written to its K rows (slot_dev, the inverse of src_dev).
+-                            // NVFP4 w4a4 activations carry a per-row scale (Xscale): that mode keeps the gather.
++                            // step 2b: the layer's activations as q8_1 rows in expert order, straight from `mixed`
++                            // (APR: or its rotated copy): each token quantized once and written to its K rows
++                            // (slot_dev, the inverse of src_dev).  NVFP4 w4a4 activations carry a per-row scale
++                            // (Xscale): that mode keeps the gather.
 +                            if (had_gu) {
 +                                strata::kernels::hadamard_rows(m.mixed, m.Xr, T, N, had_block, had_sx, m.cs);
 +                                xsrc = m.Xr;
 +                            }
-+                            mmq::quantize(xsrc, m.src_dev, m.Xq, mmq_gt, N, N, T * K, m.cs);
+                             if (mmq::fp4_activations(mmq_gt))
+-                                mmq::quantize(m.mixed, m.src_dev, m.Xq, mmq_gt, N, N, T * K, m.cs, m.Xscale);
++                                mmq::quantize(xsrc, m.src_dev, m.Xq, mmq_gt, N, N, T * K, m.cs, m.Xscale);
+                             else
+-                                mmq::quantize_scatter(m.mixed, m.slot_dev, m.src_dev, m.Xq, mmq_gt, N, N, T, (int) K, m.cs);
++                                mmq::quantize_scatter(xsrc, m.slot_dev, m.src_dev, m.Xq, mmq_gt, N, N, T, (int) K, m.cs);
                              // each group's rows: absolute bounds (gate/up reads the layer's rows), relative ones (down
                              // reads the group's own quantized H)
                              const size_t n = order.size(), ng = (n + MMQ_GROUP - 1) / MMQ_GROUP;
-@@ -3394,6 +3465,9 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -3832,6 +3904,9 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                              }
                          } else {
                              gather_rows16(m.mixed_h, m.src_dev, m.Xs, T * K, N, m.cs);
@@ -3833,7 +3764,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                          }
                          // multi-GPU: the peer's share, enqueued before the primary's own experts so both cards work at once
                          peer_now = use_mmq && !order_peer.empty();
-@@ -3408,7 +3482,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -3846,7 +3921,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                                  xs = P.x_stream;
                              }
                              if (!P.p2p && P.f16) cudaMemcpyAsync(P.host_x16, m.mixed_h, (size_t) T * N * 2, cudaMemcpyDeviceToHost, xs);
@@ -3842,7 +3773,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                              if (P.sums) {   // the routing weights, and each peer row's routed pair (t * K + k)
                                  cudaMemcpyAsync(P.host_w, m.w, (size_t) T * K * 4, cudaMemcpyDeviceToHost, xs);
                                  for (int64_t i = 0; i < T * K; ++i)
-@@ -3422,7 +3496,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -3860,7 +3935,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                              cudaStreamWaitEvent(ps, P.ev_in, 0);
                              if (P.out_pending) { cudaStreamWaitEvent(ps, P.ev_done, 0); P.out_pending = false; }
                              pe.mark(kPeMoeIn, ps);
@@ -3851,7 +3782,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                              else if (P.f16) f16_to_f32_wide(P.mixed, P.host_x16, T * N, ps);
                              else copy_f32_wide(P.mixed, P.host_x, T * N, ps);
                              P.back_at = rows_local;
-@@ -3563,6 +3637,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4001,6 +4076,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                                      gu.total_rows = nr; gu.max_rows = maxr; gu.dst = P.GU_g; gu.ld_dst = 1280;
                                      P.run_ctx->run(gu, ps);
                                      mmq::swiglu(P.GU_g, P.H_g, nr, 640, !lay.native, ps);
@@ -3860,7 +3791,7 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                                      mmq::quantize(P.H_g, nullptr, P.Hq_g, mmq_dt, 640, 640, nr, ps);
                                      const int b = (int) (g2 & 1);
                                      if (P.dm_live[b]) cudaStreamWaitEvent(ps, P.ev_dm[b], 0);   // its last rows have left
-@@ -3640,6 +3716,9 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4078,6 +4155,9 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                                      gu.total_rows = rows_peer; gu.max_rows = maxr; gu.dst = P.GU; gu.ld_dst = 1280;
                                      P.run_ctx->run(gu, ps);
                                      mmq::swiglu(P.GU + r0 * 1280, P.H + r0 * 640, nr, 640, !lay.native, ps);
@@ -3870,16 +3801,16 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                                      mmq::quantize(P.H + r0 * 640, nullptr, P.Hq, mmq_dt, 640, 640, nr, ps);
                                      mmq::Product dn;
                                      dn.w = P.grp_d; dn.type = mmq_dt; dn.w_rows = N; dn.w_cols = 640; dn.expert_bytes = mmq_db;
-@@ -3817,6 +3896,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
-                                 gu.total_rows = T * K; gu.max_rows = maxr; gu.dst = m.GU; gu.ld_dst = 1280;
-                                 m.mmq_ctx->run(gu, m.cs);
-                                 mmq::swiglu(m.GU + r0 * 1280, m.H + r0 * 640, nr, 640, !lay.native, m.cs);
+@@ -4329,6 +4409,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+                                                        m.grp_tail, r0, m.cs);
+                                 else
+                                     mmq::swiglu(m.GU + r0 * 1280, m.H + r0 * 640, nr, 640, !lay.native, m.cs);
 +                                if (had_d)
 +                                    strata::kernels::hadamard_rows(m.H + r0 * 640, m.H + r0 * 640, nr, 640, had_block, had_sh, m.cs);
                                  pt.mark(kPfGemmD, cs);
-                                 mmq::quantize(m.H + r0 * 640, nullptr, m.Hq, mmq_dt, 640, 640, nr, m.cs);
+                                 mmq::quantize(m.H + r0 * 640, nullptr, m.Hq, mmq_dt, 640, 640, nr, m.cs, m.Hscale);
                                  mmq::Product dn;
-@@ -3842,6 +3923,15 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4366,6 +4448,15 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                              pt.mark(kPfGemmGU, cs);
                              m.gemm.f16(m.Xs + o0 * N, m.dq_gu[q], m.GU + o0 * 1280, ne, 1280, N);
                              swiglu_interleaved(m.GU + o0 * 1280, m.Hh + o0 * 640, ne, m.cs);
@@ -3896,10 +3827,10 @@ index 841644452980b111c6c005c9fbc63eb6685ecbb8..18ff1ef06dc949fbd57f6ec4f4d0297d
                              m.gemm.f16(m.Hh + o0 * 640, m.dq_d[q], m.Dm + o0 * N, ne, N, 640);
                              return true;
 diff --git a/src/program/conv_cache_test.cpp b/src/program/conv_cache_test.cpp
-index d76c800b4f66a7d90b2618114d4ffea98281c507..b33defa9ab3d5754d633560d7770042ce3eba8f7 100644
+index 40da79573e66a065a8d246367f798ab1f7d5da11..32c6f78c4c988b0bf793506d1a5f20df68ba1ae8 100644
 --- a/src/program/conv_cache_test.cpp
 +++ b/src/program/conv_cache_test.cpp
-@@ -87,6 +87,19 @@ int main() {
+@@ -132,6 +132,19 @@ int main() {
          check(eviction_victim(s4.data(), s4.size(), 4, nullptr, all) == 2, "everything pinned: the oldest pin leaves, never the root");
          check(eviction_victim(s4.data(), s4.size(), 1, nullptr, all) == 0, "a one-slot budget keeps no pin: the oldest leaves");
      }
@@ -3920,7 +3851,7 @@ index d76c800b4f66a7d90b2618114d4ffea98281c507..b33defa9ab3d5754d633560d7770042c
      return g_fail ? 1 : 0;
  }
 diff --git a/src/program/generate.cpp b/src/program/generate.cpp
-index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014cc45dbd87 100644
+index aae51631691ea13c46f8724e77535e8d6d21dd34..db04d20fb82d0817550227483b9ca6cc5c290558 100644
 --- a/src/program/generate.cpp
 +++ b/src/program/generate.cpp
 @@ -42,6 +42,7 @@
@@ -3931,10 +3862,12 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
  #include "strata/kernels/ngram.hpp"
  #include "strata/kernels/iq_kernels.hpp"
  #include "strata/kernels/s2_expert_grouped.hpp"
-@@ -2748,6 +2749,28 @@ int main(int argc, char** argv) {
-                 return 1;
-             }
-         }
+@@ -3252,6 +3253,28 @@ int main(int argc, char** argv) {
+             // (strata_kq): asking for the formats opens it now, before the expert cache takes the free VRAM
+             (void) strata::prefill::mmq::supported(f.gu_type);
+             (void) strata::prefill::mmq::supported(f.d_type);
++#endif
++        }
 +        // APR (prism.hadamard) packs: every expert path rotates its activations (CPU pool: native_quant_act / _h;
 +        // GPU verify, remote GPUs, prompt FP16 path: hadamard_rows).  Validated end to end on CUDA (sm_86, sm_89 with
 +        // a two-GPU layer split and peer decode, sm_120) and on HIP gfx1151.  Other HIP architectures run the same
@@ -3955,12 +3888,10 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
 +            } else {
 +                (void) cudaGetLastError();
 +            }
-+#endif
-+        }
+ #endif
+         }
      }
-     const bool native_pack = strata::kernels::cpu::expert_layout().native;
-     // STRATA_EARLY_REMOTE_CONTEXTS=1: create EVERY secondary context here, like CUDA1's.  Under WSL2 the driver's
-@@ -8150,7 +8173,7 @@ int main(int argc, char** argv) {
+@@ -9229,7 +9252,7 @@ int main(int argc, char** argv) {
                      stamps.push_back(k.used);
                      is_tail.push_back(tail_ckpt_len >= 0 && (int64_t) k.ids.size() == tail_ckpt_len);
                  }
@@ -3969,41 +3900,48 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
                  std::unique_ptr<bool[]> tail_flags(new bool[is_tail.size()]);
                  for (size_t i = 0; i < is_tail.size(); ++i) tail_flags[i] = is_tail[i] != 0;
                  // the pin=N prefix is never the victim (flags only when one is pinned: nothing changes without)
-@@ -8162,7 +8185,8 @@ int main(int argc, char** argv) {
-                         break;
+@@ -9242,11 +9265,14 @@ int main(int argc, char** argv) {
                      }
-                 const size_t victim = strata::program::conv_cache::eviction_victim(
--                    stamps.data(), stamps.size(), o.prompt_cache, tail_flags.get(), pin_flags.get());
-+                    stamps.data(), stamps.size(), o.prompt_cache, tail_flags.get(), pin_flags.get(),
-+                    o.prompt_cache_tail);
+                 std::vector<int64_t> lens;
+                 for (const ConvCheckpoint& k : checks) lens.push_back((int64_t) k.ids.size());
++                // --prompt-cache-tail: the near-tail checkpoint is retained, so it is evicted by ordinary LRU instead
++                const bool* tail_evict = o.prompt_cache_tail ? nullptr : tail_flags.get();
+                 const size_t victim = o.prompt_cache_spread
+                     ? strata::program::conv_cache::spread_victim(lens.data(), stamps.data(), stamps.size(),
+-                                                                 o.prompt_cache, tail_flags.get(), pin_flags.get())
++                                                                 o.prompt_cache, tail_evict, pin_flags.get())
+                     : strata::program::conv_cache::eviction_victim(stamps.data(), stamps.size(), o.prompt_cache,
+-                                                                   tail_flags.get(), pin_flags.get());
++                                                                   tail_flags.get(), pin_flags.get(),
++                                                                   o.prompt_cache_tail);
+                 ckpt_pool.give(std::move(checks[victim]));   // (STRATA_CKPT_POOL; else nothing)
                  checks.erase(checks.begin() + (std::ptrdiff_t) victim);
              }
-             return true;
-@@ -10149,6 +10173,7 @@ int main(int argc, char** argv) {
-             // tuning keys (setup's calibration measures settings without restarting the engine): the PCIe share of
+@@ -11649,6 +11675,7 @@ int main(int argc, char** argv) {
              // the missed experts and the draft-probability floor, for this request only
              double req_pcie_frac = o.pcie_frac, req_spec_min_p = o.spec_min_p;
+             double req_pipe = -1.0;   // --prefill-pipe for this request (setup's calibration of a layer split)
 +            int req_pool_tasks = o.pool_tasks;
              int req_aux_cpus = -1;   // aux_cpus=0|1: --aux-cpus for this request (-1 = the start-up value)
-             if (endp != nullptr) {   // GENI takes the same keys (#75: image requests were always greedy); its
-                                      // embedding file path is the first token without an =
-@@ -10176,6 +10201,7 @@ int main(int argc, char** argv) {
+             // #2228: img_keys=<hex>,<hex>,... (GENI): each picture's key from the server (its normalized bytes' hash),
+             // in prompt order.  With them the conversation cache matches a picture by its key and grid, not by its
+@@ -11681,6 +11708,7 @@ int main(int argc, char** argv) {
                      else if (key == "penalty_present") req_penalty_present = fv;
                      else if (key == "seed") req_seed = std::strtoull(tok.c_str() + eq + 1, nullptr, 10);
-                     else if (key == "pcie_frac") req_pcie_frac = std::clamp((double) fv, 0.0, 1.0);
+                     else if (key == "pcie_frac") { req_pcie_frac = std::clamp((double) fv, 0.0, 1.0); req_pcie_set = true; }
 +                    else if (key == "pool_tasks") req_pool_tasks = std::clamp(std::atoi(tok.c_str() + eq + 1), 0, strata::kernels::cpu::ExpertPool::kMaxTasks);
                      else if (key == "spec_min_p") req_spec_min_p = std::clamp((double) fv, 0.0, 1.0);
+                     else if (key == "pipe") req_pipe = std::max(0.0, (double) fv);
                      else if (key == "aux_cpus") req_aux_cpus = std::atoi(tok.c_str() + eq + 1) != 0 ? 1 : 0;
-                     // unknown keys are skipped: the ids start at the first token without '='
-@@ -11106,6 +11132,7 @@ int main(int argc, char** argv) {
-                                  want && !strata::aux_cpus::enabled() ? " (asked for, but no CPU is spare: see the start-up line)" : "");
+@@ -13282,6 +13310,7 @@ int main(int argc, char** argv) {
              }
+             ver.pause_pcie_balance(req_pcie_set);   // the measured costs keep across requests
              drive.d.pcie_num = std::max(0, std::min(256, (int) (req_pcie_frac * 256.0 + 0.5)));
 +            if (o.batch == 0 && n_stages == 1) pool.set_phase_tasks(req_pool_tasks);
              // a layer split: CUDA0's share as asked; a later GPU keeps its own (its link) unless the request sets one
              for (int st = 0; st < split_drive.n; ++st)
                  split_drive.pcie_num[st] = (st == 0 || split_same || req_pcie_frac != o.pcie_frac)
-@@ -11177,7 +11204,18 @@ int main(int argc, char** argv) {
+@@ -13353,7 +13382,18 @@ int main(int argc, char** argv) {
                      std::fprintf(stderr, "strata serve: pin=%lld: the cache has no checkpoint there to pin (it resumed from "
                                   "%lld)\n", (long long) req_pin, (long long) read_from);
              }
@@ -4022,7 +3960,7 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
              if (pin_at >= 0) {
                  cuts.push_back(pin_at);
                  std::sort(cuts.begin(), cuts.end());   // the skipped -1s first, n - 1 still last
-@@ -11226,8 +11264,8 @@ int main(int argc, char** argv) {
+@@ -13440,8 +13480,8 @@ int main(int argc, char** argv) {
                      break;
                  }
                  at = to;
@@ -4033,9 +3971,9 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
                      std::printf("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
                      return 1;
                  }
-@@ -11294,6 +11332,25 @@ int main(int argc, char** argv) {
-             const DecSnap ds0 = dec_snap();
-             double dt_run = 0, dt_commit = 0, dt_draft = 0;
+@@ -13530,6 +13570,25 @@ int main(int argc, char** argv) {
+             double dt_adapt_wait = 0, dt_adapt_join = 0;   // the tier's wait before a window / join after the draft (ms, summed)
+             const int64_t dt_sw0 = ajob ? a_swapped : adapt_nswaps;
              int64_t dec_windows = 0, dec_T = 0;
 +            static const int ram_rebalance_limit=[]{
 +                const char* v=std::getenv("STRATA_RAM_REBALANCE");return v?std::clamp(std::atoi(v),0,512):0;
@@ -4059,10 +3997,10 @@ index 1e5299e522ff1550f180c55347bf181e85c2cabb..28256e7c1e40c5dfb785f145e39d014c
              const int64_t decode_hits0 = drive.d.cache_hits;
              // CS-T: the RAM and file tiers of this request (the mmap source; 0 with the arena)
              const int64_t ram0 = src.ram_reads(), files0 = src.file_reads();
-@@ -12344,6 +12401,10 @@ int main(int argc, char** argv) {
-             //                    not in [lookups])
-             //      [lookup-chain accepted] [lookup-chain offered] [suffix accepted] [suffix offered] [windows]
-             //      (only with --lookup-chain)
+@@ -14612,6 +14671,10 @@ int main(int argc, char** argv) {
+             //      chunk=<tokens> experts_streamed=<blobs>   (key=value, last: the first chunk of the request's longest
+             //      batched segment, 0 when it read none; the expert blobs its prompt read copied host -> device on
+             //      every stage - not the CPU share's, the stage helper's or a --peer-device peer's)
 +            drive.d.ram_heat=nullptr;
 +            if(ram_rebalance && !cancelled && !nf_hit && !maintain_ram()){
 +                std::printf("ERR %s\n",err.c_str());return 1;
@@ -4168,11 +4106,11 @@ index 0000000000000000000000000000000000000000..b19cd7d2b1df0e79efe8349f3d593c93
 +    std::puts("async_job_test: PASS"); return 0;
 +}
 diff --git a/tests/core/file_expert_source_test.cpp b/tests/core/file_expert_source_test.cpp
-index d3b213692cbcbbb27fffd09b0e9950feb45b3031..1af1f733d201ee6955b375aec5d988d6d6b76c28 100644
+index c4586c871d93e0c00988b89fcc6feca8156f02fd..5fc8ed4af31ad83ab2659f03884a5e3f1724eec9 100644
 --- a/tests/core/file_expert_source_test.cpp
 +++ b/tests/core/file_expert_source_test.cpp
-@@ -737,10 +737,49 @@ void test_rotating_source(bool rotate, bool pin) {
-     require(!src.has_resident(0, 0) && !src.exchange_rotation(), "reopen retained residency");
+@@ -908,10 +908,49 @@ void test_replace_resident(bool pin) {
+     std::cout << "replace_resident: pinned=" << pin << " exact_bytes=PASS\n";
  }
  
 +void test_ram_rebalance() {
@@ -4610,6 +4548,35 @@ index 0000000000000000000000000000000000000000..1ce3773bf2f38cb83f797114ac5de4b4
 +    0xa11a, 0xc068, 0x35bb, 0xb82e, 0x3f77, 0xbbb9, 0xb386, 0x3b46, 0xb675, 0x22f3, 0x3e8b, 0xbcb2, 0xb8ba, 0xba29, 0x4235, 0xbd08,
 +    0x1038, 0x3f9f, 0xade8, 0x399f, 0x3363, 0xb9da, 0x3909, 0x37c8, 0x3c82, 0xbc4c, 0xbc3a, 0xb788, 0xa897, 0x39da, 0xb6d2, 0x3bee,
 +};
+diff --git a/tools/check_isa_guard.py b/tools/check_isa_guard.py
+index 9e7a8e450605ba777898ae0fefd7766a1ae03eed..0b385c063c003c8efce24f3e4af28fe9ad7697a1 100644
+--- a/tools/check_isa_guard.py
++++ b/tools/check_isa_guard.py
+@@ -31,6 +31,7 @@ import sys
+ # (cpu_avx512_ok / cpu_avxvnni_ok), or reaches them only after cpu_require_expert_support().
+ WIDE_PUBLIC = {
+     "nvfp4_512_gu_rows", "nvfp4_512_rows",   # NVFP4 (native_expert.cpp: both behind cpu_avx512_ok())
++    "tq_rows_avx512",   # APR trellis rows (tq_cpu.cpp: tq_isa() picks AVX-512 only behind cpu_avx512_ok())
+     "act_quant_q8_1", "q2_0_gguf_rows_multi", "s2_expert_vnni", "s2_expert_vnni_q", "s2_expert_gu_rows",
+     "s2_expert_down_rows", "s2_expert_gu_rows_multi", "s2_expert_down_rows_multi", "s2_expert_vnni_multi",
+     "s2_expert_scalar", "iq512_gu_rows", "iq512_rows", "iq256_gu_rows", "iq256_rows", "iq256_gu_rows_v",
+@@ -38,13 +39,14 @@ WIDE_PUBLIC = {
+     "q2_0_gguf_rows_multi_avx2_v", "q2_0_gguf_rows_multi_avx2_legacy", "q2_0_gguf_rows_multi_avx2_bitplane",
+     "act_quant_q8_1_avx2", "q8k_quant_avx2", "kq256_gu_rows", "kq256_rows", "bf16_rows_dot_multi",
+ }
+-WIDE_OBJECTS = ("expert.cpp", "iq_avx512.cpp", "iq_avx2.cpp", "q2_avx2.cpp", "kq_avx2.cpp", "nvfp4_avx512.cpp")
++WIDE_OBJECTS = ("expert.cpp", "iq_avx512.cpp", "iq_avx2.cpp", "q2_avx2.cpp", "kq_avx2.cpp", "nvfp4_avx512.cpp",
++                "tq_avx512.cpp")
+ # Also compiled above the baseline (AVX2/FMA for nvfp4_avx2, AVX for the older CPUs' rows) and reached only behind a CPU
+ # check.  STATIC INITIALISERS in any of these run on EVERY CPU at program start (#2324: nvfp4_avx2.cpp / nvfp4_avx512.cpp
+ # built a table in a constructor, the compiler used AVX/FMA for it, and a Westmere / Sandy Bridge Xeon died with an
+ # illegal instruction before main, with nothing in the log).  The initialisers must not exist: constexpr tables, or
+ # function-local statics read behind the CPU check.
+-INIT_FREE_OBJECTS = WIDE_OBJECTS + ("nvfp4_avx2.cpp", "kq_avx1.cpp", "q2_avx1.cpp", "iq_avx1.cpp")
++INIT_FREE_OBJECTS = WIDE_OBJECTS + ("nvfp4_avx2.cpp", "kq_avx1.cpp", "q2_avx1.cpp", "iq_avx1.cpp", "tq_avx2.cpp")
+ 
+ # An instruction is "wide" if it is EVEX encoded (first byte 0x62 in 64-bit mode), or one of these VEX / legacy
+ # extensions that an AVX2 CPU may lack.  AVX-VNNI is VEX encoded (vpdpbusd, vpdpwssd ...).
 diff --git a/tools/embd_bf16_pack.py b/tools/embd_bf16_pack.py
 index 1ed2d642328398cca9145566ab820740e5dcd8b8..773e662f4ea83460e6ea4b4443c9b355802d158c 100644
 --- a/tools/embd_bf16_pack.py
@@ -4730,10 +4697,10 @@ index 237d5fdb46055d6bfa8365aa7ecdf9dee82e2531..4da9d2d248da29feb1f970efbc170267
  
  
 diff --git a/tools/iq_pack.py b/tools/iq_pack.py
-index 5ce0e4a52e86639fb80727b9ac97ec0f6fa91d0f..95a8228bbbd2bccc5c60404dff33c57da911118c 100644
+index cb361824739a831a85dc57e66636dfdf297129af..b48af1aad344c351a7c9c1b28fe36c7a32191d6b 100644
 --- a/tools/iq_pack.py
 +++ b/tools/iq_pack.py
-@@ -473,6 +473,92 @@ def expert_layout(model: Model, src: pathlib.Path):
+@@ -488,6 +488,92 @@ def expert_layout(model: Model, src: pathlib.Path):
      return layout, head + "".join(line + "\n" for line in lines), n_expert, offset
  
  
@@ -4826,10 +4793,10 @@ index 5ce0e4a52e86639fb80727b9ac97ec0f6fa91d0f..95a8228bbbd2bccc5c60404dff33c57d
  def experts_source(model: Model, text: str, total: int) -> dict:
      """What experts.bin is cut from: the shards (names and sizes) and the hash of native_experts.txt (every
      per-role file and offset, the formats and the blob sizes).  A same-size experts.bin of another model or
-@@ -522,6 +608,22 @@ def main() -> int:
-         print(got)
-         return 1
+@@ -539,6 +625,22 @@ def main() -> int:
      layout, text, n_expert, offset = got
+     if any(t.type_name == "NVFP4" for *_, ts in layout for t in ts):
+         a.experts_bin = True   # the GGUF holds the weights without the scale tails: the engine must read experts.bin
 +    # ---- prism.hadamard: rotated experts need hadamard.txt beside native_experts.txt, which becomes v5 so an engine
 +    # that cannot rotate refuses the pack (instead of running the folded experts on unrotated activations)
 +    t0 = layout[0][5]
@@ -4849,7 +4816,7 @@ index 5ce0e4a52e86639fb80727b9ac97ec0f6fa91d0f..95a8228bbbd2bccc5c60404dff33c57d
      path = out / "experts.bin"
      sidecar = out / "experts.bin.src.json"
      want = experts_source(model, text, offset)
-@@ -569,6 +671,12 @@ def main() -> int:
+@@ -608,6 +710,12 @@ def main() -> int:
      # ---- the experts.  native_experts.txt is written to a temporary name and renamed only when every layer is
      # in: a stop part-way (a layer split across shards, #171) left a partial native_experts.txt that the next setup
      # run took as a finished pack (#172).  It is the pack's completion marker, so it is published last.

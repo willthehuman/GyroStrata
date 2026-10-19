@@ -125,5 +125,25 @@ class APIKeyChoice(unittest.TestCase):
             self.assertEqual(recipe.configure_api_key(runtime, False), first)
 
 
+class BlackwellToolkit(unittest.TestCase):
+    def nvcc(self, build):
+        return "Cuda compilation tools, release 13.2, V13.2.%d\nBuild cuda_13.2.r13.2\n" % build
+
+    def test_blackwell_refuses_13_2_before_update_2(self):
+        for arch in ["100", "120", "121"]:
+            for build in [51, 78]:
+                with self.assertRaisesRegex(RuntimeError, "Update 2"):
+                    setup_entry.check_blackwell_toolkit(self.nvcc(build), arch)
+
+    def test_blackwell_accepts_update_2_and_older_gpus_any_13_2(self):
+        setup_entry.check_blackwell_toolkit(self.nvcc(86), "120")
+        for arch in ["75", "86", "89", "90"]:
+            setup_entry.check_blackwell_toolkit(self.nvcc(51), arch)
+
+    def test_blackwell_refuses_unparsed_version(self):
+        with self.assertRaises(RuntimeError):
+            setup_entry.check_blackwell_toolkit("Cuda compilation tools, release 13.2", "120")
+
+
 if __name__ == "__main__":
     unittest.main()

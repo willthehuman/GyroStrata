@@ -8,7 +8,7 @@ NVIDIA/CUDA is tested. **AMD/HIP on Windows 11 is experimental:** [AMD setup](AM
 
 ## Install
 
-NVIDIA prerequisites: [Git](https://git-scm.com/downloads/win), [Python 3.12-3.14](https://www.python.org/downloads/windows/), [VS 2022 C++ Build Tools](https://aka.ms/vs/17/release/vs_BuildTools.exe) with C++/Windows SDK, [CUDA Toolkit 13.2](https://developer.nvidia.com/cuda-toolkit-archive), and NVIDIA driver R580+.
+NVIDIA prerequisites: [Git](https://git-scm.com/downloads/win), [Python 3.12-3.14](https://www.python.org/downloads/windows/), [VS 2022 C++ Build Tools](https://aka.ms/vs/17/release/vs_BuildTools.exe) with C++/Windows SDK, [CUDA Toolkit 13.2](https://developer.nvidia.com/cuda-toolkit-archive) (Update 2 or later for RTX 50-series), and NVIDIA driver R580+.
 
 Allow **120 GiB for weights/pack**, **4 GiB for engine files**, plus prerequisites. Keep the engine folder in a permanent location.
 
@@ -55,10 +55,11 @@ Three runs on one NVIDIA 12 GB / 32 GB PC: synthetic Python continuation, thinki
 | 192K | 1,785 (1,782-1,786) | 36.8 (35.6-37.8) |
 | Near 256K | 1,755 (1,753-1,758) | 36.6 (35.4-37.8) |
 
-Long-context retrieval, arithmetic and cache-return checks passed. The 32K GPU cache does **not** limit attention to 32K; leave room for output within 256K.
+These rows were measured on Strata v0.1.43.1; the engine now builds on v0.1.45 and has not been re-measured. Long-context retrieval, arithmetic and cache-return checks passed. The 32K GPU cache does **not** limit attention to 32K; leave room for output within 256K.
 
 ## Changelog
 
+- Strata v0.1.45 base; fixed TQ2_T corruption on RTX 50-series GPUs and the model downloader's 404.
 - Experimental Windows AMD/HIP build, device selection, adapter memory guards and parity-gated installation.
 - Imported native Gyro trellis/Hadamard support for CPU, GPU and prefill.
 - Faster CPU expert kernels, overlapping SSD reads, RAM expert rebalancing and adjustable read merging.

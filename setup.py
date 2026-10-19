@@ -78,6 +78,17 @@ def vcvars():
     return str(result)
 
 
+def check_blackwell_toolkit(nvcc_version, arch):
+    # CUDA 13.2 before Update 2 (nvcc V13.2.86) drops a byte mask in the TQ2_T decoder for sm_100 and newer. The
+    # pinned llama.cpp prompt kernels contain the same code and are not patched here, so require the fixed toolkit.
+    build = re.search(r"\bV13\.2\.(\d+)", nvcc_version)
+    if int(arch) >= 100 and (not build or int(build[1]) < 86):
+        raise RuntimeError(
+            "This GPU needs CUDA Toolkit 13.2 Update 2 (nvcc V13.2.86) or a later 13.2 update; "
+            "earlier 13.2 compilers miscompile the TQ2_T kernels for Blackwell GPUs."
+        )
+
+
 def main():
     from recipe import add_tuning_arguments
 
@@ -186,13 +197,13 @@ def main():
         raise RuntimeError(
             "Install CUDA Toolkit 13.2; the existing driver is not changed by this installer."
         )
-    version = re.search(
-        r"release (\d+)\.(\d+)", subprocess.check_output([nvcc, "--version"], text=True)
-    )
+    nvcc_version = subprocess.check_output([nvcc, "--version"], text=True)
+    version = re.search(r"release (\d+)\.(\d+)", nvcc_version)
     if not version or (int(version[1]), int(version[2])) != (13, 2):
         raise RuntimeError(
             "This release was validated with CUDA Toolkit 13.2. Select that toolkit; other toolkits need separate build validation."
         )
+    check_blackwell_toolkit(nvcc_version, gpu["arch"])
     supported = subprocess.check_output([nvcc, "--list-gpu-code"], text=True).split()
     if "sm_" + gpu["arch"] not in supported:
         raise RuntimeError(

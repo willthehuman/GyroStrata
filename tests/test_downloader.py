@@ -13,6 +13,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAYLOAD = b"Gyro downloader fixture: unchanged bytes.\n" * 16
 FILENAME = "Qwen3.8-Flash-Next-Gyro-M-TQ2_0.gguf"
+URL_LINE = '    $Url = "https://huggingface.co/$Repository/resolve/$Revision/${FileName}?download=true"'
 
 
 class Weights(http.server.BaseHTTPRequestHandler):
@@ -66,9 +67,9 @@ class Downloader(unittest.TestCase):
             )
             (root / "pins.json").write_text(json.dumps(pin))
             script = (ROOT / "Download-Gyro-M.ps1").read_text(encoding="utf-8-sig")
+            self.assertEqual(script.count(URL_LINE), 1)
             script = script.replace(
-                '$Url = "https://huggingface.co/$Repository/resolve/$Revision/$FileName?download=true"',
-                f'$Url = "http://127.0.0.1:{self.server.server_port}/weights"',
+                URL_LINE, f'$Url = "http://127.0.0.1:{self.server.server_port}/weights"'
             )
             script = script.replace(
                 "& $Curl --fail", "& $Curl --silent --show-error --fail"
@@ -117,6 +118,27 @@ class Downloader(unittest.TestCase):
                     (root / ".model-dir").read_text(encoding="utf-8-sig")
                 )
                 self.assertTrue(saved.samefile(target))
+
+    def test_url_keeps_the_file_name(self):
+        # "$FileName?download" would expand a variable named FileName?download: the URL lost the file name (#1)
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                '$Repository = "fixture/model"; $Revision = "' + "0" * 40 + '"; $FileName = "' + FILENAME + '"; '
+                + URL_LINE.strip() + "; $Url",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        self.assertEqual(
+            result.stdout.strip(),
+            "https://huggingface.co/fixture/model/resolve/" + "0" * 40 + "/" + FILENAME + "?download=true",
+            result.stderr,
+        )
 
     def test_fresh_download(self):
         self.exercise("fresh")

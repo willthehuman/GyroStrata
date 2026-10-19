@@ -24,7 +24,7 @@ try {
         $Repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$') {
         throw 'Model pins are incomplete or invalid. Extract a fresh release.'
     }
-    $Url = "https://huggingface.co/$Repository/resolve/$Revision/$FileName?download=true"
+    $Url = "https://huggingface.co/$Repository/resolve/$Revision/${FileName}?download=true"
 
     if ([string]::IsNullOrWhiteSpace($Destination)) {
         Add-Type -AssemblyName System.Windows.Forms

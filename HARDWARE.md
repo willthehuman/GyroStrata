@@ -4,7 +4,7 @@ The tested CUDA path is a Windows x64 baseline for **12 GB or larger NVIDIA VRAM
 
 The engine builds for the selected GPU's actual CUDA architecture. Examples of eligible 12 GB variants include RTX 3060/3080/3080 Ti (8.6), RTX 4070/4070 SUPER/4070 Ti (8.9), and RTX 5070 (12.0). Check the exact SKU: laptop and desktop cards can have different VRAM. Architecture eligibility comes from [NVIDIA's compute-capability table](https://developer.nvidia.com/cuda/gpus); it is not evidence that we benchmarked each card.
 
-CUDA Toolkit 13.2 and VS 2022 C++ x64 tools plus a Windows SDK are the validated build combination. CUDA 13.x has an [R580 driver floor](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html); some newer features can require a newer driver. Numerical tests must pass on the installed driver. The [CUDA Windows guide](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-installation-guide-microsoft-windows/index.html) covers prerequisites. This installer never changes drivers. Pascal/Volta and GPUs below compute capability 7.5 are outside this release.
+CUDA Toolkit 13.2 and VS 2022 C++ x64 tools plus a Windows SDK are the validated build combination. RTX 50-series and other Blackwell GPUs (compute capability 10.0 or newer) need CUDA 13.2 Update 2 (nvcc V13.2.86) or a later 13.2 update: earlier 13.2 compilers miscompile the TQ2_T kernels for those GPUs, and INSTALL.cmd refuses them. CUDA 13.x has an [R580 driver floor](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html); some newer features can require a newer driver. Numerical tests must pass on the installed driver. The [CUDA Windows guide](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-installation-guide-microsoft-windows/index.html) covers prerequisites. This installer never changes drivers. Pascal/Volta and GPUs below compute capability 7.5 are outside this release.
 
 ## How the baseline adapts
 
@@ -30,7 +30,7 @@ Use the README's Claude Code/Codex prompt, or compare these controls on identica
 - **--pool-tasks N:** 64–4096 task chunks.
 - **--pcie-fraction X:** 0–1.
 - **--ram-experts-gib N:** 4–16 GiB; free-RAM safety still reduces it.
-- **--vram-reserve-mib N:** 1024–8192 MiB; increase if the GPU guard trips.
+- **--vram-reserve-mib N:** 1024–8192 MiB; increase if the GPU guard trips. VRAM left unreserved holds the GPU expert cache, so a smaller reserve is usually faster. On a 12 GB card, the Windows desktop and a browser can already use over 1 GB; close them, then lower the reserve while the guard stays quiet.
 - **--gpu N:** select the NVIDIA GPU or HIP device; rebuild when its architecture differs.
 
 Pass controls to INSTALL.cmd with --model-dir. To change settings without rebuilding, run:
@@ -57,7 +57,7 @@ The included benchmark is serial and writes private results under local-results:
 .\.venv\Scripts\python.exe benchmarks\context-grid.py --model-dir "C:\Your Model Folder" --out local-results\run1
 ```
 
-Use run2 and run3 for independent repetitions. Keep only repeatable gains; check representative tasks, full context, reasoning and cache return as well as tok/s. Generated profiles, results and logs are excluded from Git by default.
+Use run2 and run3 for independent repetitions. The first stages of a run on a fresh boot also fill the OS file cache and the expert caches, so compare run2/run3 rather than run1's 8K row. A reply that misses the context marker is retried once at temperature 0; only a greedy miss fails the run. Keep only repeatable gains; check representative tasks, full context, reasoning and cache return as well as tok/s. Generated profiles, results and logs are excluded from Git by default.
 
 ## Experimental AMD/HIP
 
