@@ -11,11 +11,11 @@ CUDA Toolkit 13.2 and VS 2022 C++ x64 tools plus a Windows SDK are the validated
 | Resource | Policy | What still affects speed |
 |---|---|---|
 | GPU | Compile for its detected architecture; select by UUID. Rebuild for a different architecture. | Core throughput, VRAM bandwidth, power limits and background apps. |
-| VRAM | Automatic expert cache; minimum 1024 MiB reserve. Guard is min(11776 MiB, reported total minus 512 MiB). | Windows can report less memory than the card's advertised capacity. A sampled guard can briefly overshoot before stopping. |
+| VRAM | Automatic expert cache; 1216 MiB reserve by default (1024 put a 12 GB card with ~1.5 GB of desktop VRAM over the guard on its first request). Guard is min(11776 MiB, reported total minus 512 MiB). | Windows can report less memory than the card's advertised capacity. A sampled guard can briefly overshoot before stopping. |
 | CPU | Native automatic workers; task chunks scaled from physical cores, 64–192 by default. AVX2 checked. | Core speed, hybrid cores, SIMD, affinity and contention. |
-| RAM | Expert budget = min(16 GiB, floor(initial available GiB minus 10)). At least 14 GiB initially free; runtime floor 512 MiB. | Channels, speed, latency and other applications. |
-| PCIe | Default scheduling fraction 0.75, with a persistent override. | Link width/generation and actual transfer bandwidth are not automatically calibrated. |
-| SSD | Read-only inference data access, overlapping expert reads, interleaved expert layout. | NVMe/SATA, random latency, throttling and filesystem. Installation writes the download and pack once; the OS can still write logs or page data. |
+| RAM | Expert budget = min(16 GiB, floor(initial available GiB minus 10)). At least 14 GiB initially free; runtime floor 512 MiB. Conversation cache 3 GiB below 48 GB RAM, 4 GiB above (4 GiB let a 128K follow-up reach the floor on 32 GB). | Channels, speed, latency and other applications. |
+| PCIe | Default scheduling fraction 0.75, with a persistent override; TUNE.cmd compares 0.75, 0.55 and the engine's own probe on your PC. | Link width/generation and actual transfer bandwidth. |
+| SSD | Read-only inference data access, overlapping expert reads, interleaved expert layout; low-ranked SSD-only experts skipped (STRATA_FILE_SKIP, see TUNING.md). | NVMe/SATA, random latency, throttling and filesystem. Installation writes the download and pack once; the OS can still write logs or page data. |
 | Context | Full 262144 host context with 32768 GPU KV pages and Q4 K/V. | KV transfers, output length and workload; quantization has a precision tradeoff. |
 
 Larger GPUs retain the absolute 11.5 GiB guard. More RAM does not automatically raise the 16 GiB expert ceiling. This baseline does not apply driver or clock tuning.
@@ -24,13 +24,13 @@ Fallback partial pinning scales from 2 to 8 GiB. Upstream can pin the entire res
 
 ## Tune the host
 
-Use the README's Claude Code/Codex prompt, or compare these controls on identical prompts and background load:
+Start with **TUNE.cmd** ([TUNING.md](TUNING.md)): it measures expert skipping and the PCIe share on your PC and is where almost all of the speed is. The controls below are second-order; compare them on identical real prompts and background load:
 
 - **--workers N:** zero is native automatic selection.
 - **--pool-tasks N:** 64–4096 task chunks.
 - **--pcie-fraction X:** 0–1.
 - **--ram-experts-gib N:** 4–16 GiB; free-RAM safety still reduces it.
-- **--vram-reserve-mib N:** 1024–8192 MiB; increase if the GPU guard trips. VRAM left unreserved holds the GPU expert cache, so a smaller reserve is usually faster. On a 12 GB card, the Windows desktop and a browser can already use over 1 GB; close them, then lower the reserve while the guard stays quiet.
+- **--vram-reserve-mib N:** 1024–8192 MiB (default 1216); increase if the GPU guard trips. VRAM left unreserved holds the GPU expert cache, so a smaller reserve is usually faster. On a 12 GB card, the Windows desktop and a browser can already use over 1 GB; close them, then lower the reserve while the guard stays quiet.
 - **--gpu N:** select the NVIDIA GPU or HIP device; rebuild when its architecture differs.
 
 Pass controls to INSTALL.cmd with --model-dir. To change settings without rebuilding, run:
@@ -41,7 +41,7 @@ Pass controls to INSTALL.cmd with --model-dir. To change settings without rebuil
 
 For HIP installations, include `--backend hip` in that command.
 
-That is an experiment, not a recommended replacement. Omit overrides to restore defaults. The launcher preserves chosen overrides while checking current free RAM.
+That is an experiment, not a recommended replacement. Omit overrides to restore defaults. The launcher preserves chosen overrides while checking current free RAM. A TUNE.cmd result is applied after them: if it chose a PCIe share, that replaces `--pcie-fraction`; delete `.gyro-recipe\M.tune.json` to measure from your own overrides again.
 
 CUDA_PATH selects Toolkit 13.2 when multiple toolkits are installed. For portable VS tools, set GYRO_VCVARS to their vcvars64.bat; do not disable compiler checks.
 

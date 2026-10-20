@@ -1,0 +1,108 @@
+We need answer user's request. Need review C++ inference engine headers above, identify three most serious concurrency, memory-safety or numerical risks. For each: quote exact function, walk concrete failure scenario step by step, estimate likelihood, propose fix as code diff. Finish prioritized table.
+
+Need analyze code. Need be careful: only headers shown, but can infer. Need likely bugs.
+
+Let's inspect files:
+- arch_defaults.hpp declarations only.
+- async_job.hpp: persistent worker. Potential exception handling? AsyncJob::wait rethrows exception after unlocking? Let's inspect.
+class AsyncJob:
+mu_, wake_, done_, job_, error_, pending_, stopping_, thread_.
+Constructor thread lambda:
+unique_lock lk(mu_);
+for (;;) {
+ wake_.wait(lk, [&]{ return pending_ || stopping_; });
+ if (!pending_) return;
+ auto job = std::move(job_);
+ lk.unlock();
+ exception_ptr error;
+ try { job(); } catch (...) { error = current_exception(); }
+ lk.lock(); error_ = error; pending_ = false; done_.notify_all();
+}
+Destructor sets stopping true notify join.
+start locks, if pending throw logic_error, set job, error null, pending true notify.
+wait: unique_lock lk(mu_); done_.wait(lk, [&]{ return !pending_; }); auto error = error_; error_ = nullptr; lk.unlock(); if (error) rethrow_exception(error).
+
+Concurrency risk? If job throws, wait rethrows. If wait called concurrently? Maybe two threads wait? done_ predicate !pending_. If one waiter takes error and clears, second waiter may not see exception? But only one outstanding job. Could be issue: if exception occurs and wait returns, error cleared. If another thread also waiting? Not likely. But if wait called after job completes and error set? If wait called twice after completion: first rethrows, second no exception. But API likely one wait. More serious: AsyncJob::Await destructor catches all exceptions, swallowing errors. Could hide failures. But memory safety? Maybe captured data released before job completion? Await destructor waits, finish waits. If user forgets finish and object destroyed, waits. okay.
+
+Potential race: thread lambda captures this. AsyncJob destructor sets stopping true and join. If thread is running job, destructor cannot join until job finishes. okay. If job throws, thread continues. okay. If job_ is moved and job() throws, error stored.
+
+But maybe if start is called while previous job pending, throws logic_error while holding lock, job_ not set. okay.
+
+- batch_rows.hpp: validation logic. Let's inspect for bug:
+inline const char* batch_rows_error(const int* rows, int S, const int64_t* pos, int n_slots, int max_t, int hbase, bool via_handoff, int handoff_rows) {
+ if (S < 1 || S > max_t || hbase < 0 || (via_handoff && hbase + S > handoff_rows)) return...
+ for t:
+   if rows[t]<0 || >= n_slots return...
+   for u=0; u < t-1; ++u
+      if rows[u] == rows[t] && rows[t - 1] != rows[t] return "contiguous";
+   if t>0 && rows[t]==rows[t-1] && pos[t]!=pos[t-1]+1 return...
+ return nullptr;
+}
+The contiguity check: for slot proposed rows must be contiguous. It checks any earlier row u (0..t-2) equal to current row t, and previous row t-1 not equal. This catches non-contiguous duplicates? Example rows [0,1,0]. t=2: u=0 rows[0]==rows[2], rows[1]!=rows[2] => error. Good. Example [0,0,1,0]? t=3: u=0 rows[0]==rows[3], rows[2]!=rows[3] => error. Good. But what about rows [0,1,1,0]? t=3: u=0 equal, rows[2]!=rows[3] error. Good. What about rows [0,0,0]? t=1 no u; t=2 u=0 equal but rows[1]==rows[2], no error. Good. What about rows [0,1,2,1]? t=3 u=1 equal, rows[2]!=rows[3] error. Good.
+But pos check only for consecutive equal rows. If non-contiguous duplicate caught. If duplicate with same slot but previous not equal, error. Good.
+Potential integer overflow hbase + S? hbase int, S int, handoff_rows int. hbase nonnegative, S > max_t maybe max_t int. hbase+S could overflow if both large. Not likely but possible. Could propose safe check hbase > handoff_rows - S. But likely not top.
+
+- conversation_buffer.hpp:
+Segment vector<uint8_t>. resize(n). Potential bug: allocation_peak uses segment_capacity with full ? segment_bytes : ... maybe okay.
+resize:
+if n > size_:
+ held=size_; growing=held !=0; spare = segments_.empty()?0: back.capacity()-back.size(); extend=min(n-size_, spare); extra=n-size_-extend; segments_.reserve(segments_.size()+ extra/segment_bytes + extra% !=0);
+ if extend: back.resize(back.size()+extend,value); size_ += extend;
+ while size_<n: count=min(segment_bytes,n-size_); previous=segments_.empty()?0:back.capacity(); segment.reserve(segment_capacity(count, previous, growing, held)); segment.resize(count,value); segments_.push_back(std::move(segment)); size_ += count; progress_beat();
+else shrink: while !segments_.empty() && size_ - segments_.back().size() >= n { size_ -= back.size(); pop_back(); } if size_>n back.resize(back.size() - (size_-n)); size_=n;
+
+Potential bug in shrink: while condition uses size_ - segments_.back().size() >= n. Suppose size_=10, back size=3, n=7: 10-3=7 >=7 true, pop back size=7. Then if size_>n false. Good. Suppose size_=10, back size=3, n=8: 10-3=7>=8 false. Then if size_>n (10>8) resize back by 2: back.resize(1); size_=8. Good.
+But if segments_ empty? while false; if size_>n? size_ should 0, no.
+
+Potential issue: segment_capacity uses held (old size) for geometric bound. If growing false (held=0) returns count. If growing true, geometric = min(segment_bytes, max(65536, min(previous, segment_bytes/2)*2)); return max(count, min(geometric, max(65536, held/8))). Suppose held small, held/8 < 65536, min(geometric,65536) maybe 65536, max(count,65536) could overallocate 64KiB for tiny append. intentional. But if held/8 huge, geometric maybe 16MiB. okay.
+
+Memory safety: visit_impl: if offset > size_ || count > size_ - offset return false. Then loop segments. If segments empty and count=0 returns true? If offset=0 count=0 okay. If offset=size_ count=0 true. If offset > size false. Good. fn pointer segment.data()+offset-begin. For segment empty? data may nullptr but count 0? If segment.size=0 and offset==end? begin=end, offset<end false. no.
+
+operator==: while a<segments_.size() && b<other.segments_.size(); n=min(left.size()-x, right.size()-y). If left.size()==x? Should not happen? x reset when reaches left.size. But if segment size 0? Could left.size()-x = 0, n=0, memcmp 0, then if x==left.size() true increment. okay. If both segments zero? infinite? Let's see: segments can be empty? resize never pushes zero count? count min(segment_bytes, n-size_), if n>size count >0. shrink may resize back to 0? In shrink if size_>n and back.resize(back.size() - (size_-n)), could result 0? Example size_=5, back size=5, n=0: while size_-back.size()=0>=0 true pops all. So no zero segment. If size_=5, back size=3, n=2: condition 2>=2 pop back size=2; no zero. If size_=5, back size=3, n=3: condition 2>=3 false, resize back by 2 -> size 1. no zero. But initial empty segments. operator== with empty segments and size=0: while false return true. Good.
+
+- conversation_cache.hpp:
+ConversationCache::best loops entries reverse. consider e.live and checkpoints. Match serial. borrows checks serial. make_room etc. Potential concurrency? Not thread-safe. But maybe used single-thread. Could be serious if server multithreaded? Not in headers.
+
+- conversation_file.hpp only declarations.
+- conversation_memory.hpp declarations.
+- conversation_snapshot.hpp declarations.
+- coupled_draft.hpp inline functions. Potential numerical? counter arithmetic. But just helpers.
+- device.hpp declarations.
+- dma_batch.hpp: copy_blobs uses cudaMemcpyBatchAsync. Potential issue: if batch fails and first >0? It says first failing copy ends loop? But with batch API, if e != success, then fallback loop copies all blobs again? The code: if e == cudaSuccess return success; warn; cudaGetLastError(); then after if block goes to loop. If batch partially submitted? cudaMemcpyBatchAsync maybe first indicates first failed? In code ignores first. Fallback loop copies all blobs from beginning. Could duplicate copies? If batch submitted some copies before failure? cudaMemcpyBatchAsync likely atomic? But maybe not. Could cause memory corruption? Probably not.
+Potential risk: host_alias cache maps const void* to alias. If host pointer freed and reused, stale alias? But experts fixed. Could be bug in general. Not top.
+- emulate.hpp okay.
+- exchange_storage.hpp: concurrency risk with atomic experts and spares. commit uses spare_id reference and atomic stores. But spares_ is vector<size_t> not atomic; commit serialized? Comment says spares touched only serialized cache manager. But commit could be called concurrently? It publishes one atomic slot ID; spares_ modified non-atomic. If concurrent commit, race. But maybe serialized.
+Potential memory safety: initialize_sized bounds: at >= resident_bytes || sizes[i] > resident_bytes - at. Good. exchange_bytes_needed overflow: sum classes; if sum > lim/count return 0; return (count-bounce)*sum + bounce*classes.back(). If count-bounce maybe 0. Good.
+commit: checks buffer_bytes_[incoming_slot] != bytes || expert_bytes_[out] != bytes || buffers_[spare_id].host != staged. Then experts_[out].store(spare_id); spare_id = incoming_slot; experts_[in].store(kAbsent). If concurrent reads? A background router lookahead can query residency to skip redundant prefetches. Actual compute readers obey completion contract. Could race: reader sees experts_[out] updated to spare_id before copy completed? commit called after out landed in spare(q,bytes). okay.
+
+- expert_cache.hpp declarations. Potential risk in slot_of/residency? Not definitions.
+
+Need identify three most serious risks from given code. Need maybe focus on actual implementation bugs visible. Let's scrutinize all inline functions for subtle bug.
+
+ConversationBuffer::allocation_peak:
+size_t allocation_peak(size_t n) const {
+ size_t total = bytes();
+ if (n <= size_) return total;
+ const size_t spare = segments_.empty() ? 0 : segments_.back().capacity() - segments_.back().size();
+ const size_t extra = n - size_ - std::min(n - size_, spare);
+ const size_t full = extra / segment_bytes, tail = extra % segment_bytes;
+ if (!add(total, full * segment_bytes)) return SIZE_MAX;
+ if (tail && !add(total, segment_capacity(tail, full ? segment_bytes :
+        segments_.empty() ? 0 : segments_.back().capacity(), size_ != 0, size_))) return SIZE_MAX;
+ size_t count = segments_.size();
+ if (!add(count, full + (tail != 0))) return SIZE_MAX;
+ if (count > segments_.capacity() &&
+     (count > SIZE_MAX / sizeof(Segment) || !add(total, count * sizeof(Segment)))) return SIZE_MAX;
+ return total;
+}
+
+Potential bug: spare = back.capacity() - back.size(), but if segments empty? okay. extra = n-size_ - min(n-size_, spare) => extra = max(0, n-size_-spare). If spare > n-size_, extra 0. full=0 tail=0. But if spare enough, allocation_peak does not account directory reserve? It returns total. But resize when spare enough doesn't reserve new segments. okay.
+If tail and full? segment_capacity(tail, full ? segment_bytes : ...). If full>0, previous capacity assumed segment_bytes. But if full segments each reserve segment_bytes? In resize, after pushing full 16MiB segments, previous capacity = segment_bytes. Good. But allocation_peak adds full*segment_bytes, then tail capacity. It doesn't account that full segments capacity exactly segment_bytes; yes.
+Potential overflow full*segment_bytes checked by add? add checks extra > SIZE_MAX-n but doesn't check multiplication overflow before add. full * segment_bytes could overflow size_t. full = extra / segment_bytes, extra <= SIZE_MAX-size? n-size could be huge. full*segment_bytes <= extra? Actually full*segment_bytes <= extra, so no overflow if extra <= SIZE_MAX? extra = n-size_-min... n, size size_t. If n-size overflows? n > size, so n-size valid. spare <= SIZE_MAX. min valid. extra <= SIZE_MAX. full*segment_bytes <= extra <= SIZE_MAX. okay.
+segment_capacity: geometric = std::min(segment_bytes, std::max<size_t>(65536, std::min(previous, segment_bytes/2)*2)); If previous large, min(previous, segment_bytes/2)*2 = segment_bytes, min=segment_bytes. If previous=0, max(65536,0)=65536. held/8. If held/8 overflow? held size_t, /8 ok. max size_t. Good.
+
+But resize uses segments_.reserve before extending? If reserve throws, state unchanged? It may allocate directory. If extend then push. If push throws, size_ might have been increased by extend but segments_ maybe? If segment.reserve throws before push, size_ unchanged. If segment.resize throws after reserve? segment local destroyed, size_ unchanged. If segments_.push_back throws? size_ unchanged? push_back may allocate and throw; no segment added. okay. If segments_.reserve throws, no state changed. Good.
+
+Potential bug: shrink can leave segments with capacity larger than size and size_ correct. bytes() counts capacity, okay.
+
+ConversationCache:

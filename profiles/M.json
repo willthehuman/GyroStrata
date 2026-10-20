@@ -10,7 +10,7 @@
     "--expert-cache",
     "auto",
     "--vram-reserve-mib",
-    "1024",
+    "1216",
     "--prefill",
     "auto:32768",
     "--spec",

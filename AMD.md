@@ -8,12 +8,13 @@ Candidate discrete architectures: `gfx1030`, `gfx1031`, `gfx1100`, `gfx1101`, `g
 
 ## Install
 
-Run **DOWNLOAD-MODEL.cmd**, or reuse the pinned weights. Then run in PowerShell:
+START-HERE.cmd is for NVIDIA GPUs. On AMD, run **DOWNLOAD-MODEL.cmd** (or reuse the pinned weights), then in PowerShell:
 
 ```powershell
 $ModelDir = "C:\Your Model Folder"
 $HipRoot = "C:\Your ROCm SDK"
 .\INSTALL.cmd --backend hip --hip-root "$HipRoot" --model-dir "$ModelDir"
+.\TUNE.cmd --model-dir "$ModelDir"     # optional; not yet measured on AMD hardware
 & "$ModelDir\Start-Gyro-M-256K.cmd"
 ```
 

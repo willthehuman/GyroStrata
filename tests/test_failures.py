@@ -45,7 +45,7 @@ class UserFailures(unittest.TestCase):
             self.assertNotIn("api_key", json.loads((root / "M.json").read_text()))
 
     def test_gpu_telemetry_validation(self):
-        good = "0, Example GPU, 11911, 500, 8.6, GPU-TEST, 616.92\n"
+        good = "0, Example GPU, 11911, 500, 8.6, GPU-TEST, 590.48\n"
         with patch("subprocess.check_output", return_value=good):
             self.assertEqual(hardware.gpu_info()["arch"], "86")
         for bad in [
@@ -69,7 +69,7 @@ class UserFailures(unittest.TestCase):
                 used_mib=500,
                 arch="86",
                 uuid="GPU-TEST",
-                driver="616.92",
+                driver="590.48",
             ),
             avx2=True,
             physical_cores=6,
@@ -182,6 +182,18 @@ class UserFailures(unittest.TestCase):
                     timeout=20,
                 )
                 self.assertEqual(result.returncode, 7, result.stderr)
+            # START-HERE.cmd passes its script's exit code through, also from a path with & ! %
+            (root / "Start-Here.ps1").write_text("exit 7\n", encoding="utf-8")
+            (root / "START-HERE.cmd").write_bytes((ROOT / "START-HERE.cmd").read_bytes())
+            result = runtime.run_batch(root / "START-HERE.cmd", env=env, check=False, stdin=subprocess.DEVNULL,
+                                       capture_output=True, timeout=60)
+            self.assertEqual(result.returncode, 7, result.stderr)
+            # TUNE.cmd before INSTALL.cmd: a clear message and a failure code, not a missing-file error
+            (root / "TUNE.cmd").write_bytes((ROOT / "TUNE.cmd").read_bytes())
+            result = runtime.run_batch(root / "TUNE.cmd", env=env, check=False, stdin=subprocess.DEVNULL,
+                                       capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("Run INSTALL.cmd first", result.stdout)
 
     def test_missing_profile_has_clear_error_and_no_traceback(self):
         result = subprocess.run(

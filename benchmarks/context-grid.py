@@ -20,6 +20,7 @@ import psutil
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from hardware import resource_info, adapt
+from tuning import apply_file as apply_tuning
 from runtime import (
     check_build,
     check_config,
@@ -107,6 +108,8 @@ def run_model(item):
         cfg.get("_recipe_workers"),
         cfg.get("_recipe_tuning"),
     )
+    tuned = apply_tuning(cfg, selected_env, original, hw, resource_selection)   # the launcher's .tune.json, as a start would use it
+    print(tuned, flush=True)
     limit = resource_selection["gpu_limit_mib"]
     profile_index = cfg["args"].index("--expert-profile") + 1
     profile_original = pathlib.Path(cfg["args"][profile_index])
@@ -131,6 +134,7 @@ def run_model(item):
         warmup=WARM_8K,
         protocol=hashlib.sha256(marshal.dumps(run_model.__code__)).hexdigest(),
         resource_selection=resource_selection,
+        tuning=tuned,
         selected_args=cfg["args"],
         environment={
             k: v

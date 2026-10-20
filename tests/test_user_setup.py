@@ -145,5 +145,56 @@ class BlackwellToolkit(unittest.TestCase):
             setup_entry.check_blackwell_toolkit("Cuda compilation tools, release 13.2", "120")
 
 
+class CheckWithBusyRam(unittest.TestCase):
+    """--check (START-HERE's first step) and --build-only pass with little free RAM; the install still refuses it."""
+
+    def hardware(self, available):
+        return dict(gpu=dict(name="TEST", total_mib=12288, used_mib=900, arch="89", uuid="GPU-TEST", driver="590.48"),
+                    physical_cores=8, ram_gib=31.9, available_ram_gib=available, avx2=True)
+
+    def test_check_passes_and_warns(self):
+        argv = ["setup.py", "--check"]
+        with patch.object(sys, "argv", argv), patch("os.name", "nt"), patch("verify.verify_release"), \
+                patch("hardware.resource_info", return_value=self.hardware(9.0)), \
+                patch.object(setup_entry, "vcvars", return_value=""), \
+                patch("shutil.which", return_value="git"), \
+                patch("subprocess.check_output", side_effect=["Cuda compilation tools, release 13.2, V13.2.78", "sm_89"]), \
+                patch("pathlib.Path.is_file", return_value=True), \
+                patch("builtins.print") as printed:
+            setup_entry.main()
+        text = " ".join(str(c) for c in printed.call_args_list)
+        self.assertIn("only 9.0 GiB of RAM is free", text)
+        self.assertIn("Prerequisites found", text)
+
+    def test_install_still_needs_free_ram(self):
+        from hardware import adapt
+        profile = json.loads((ROOT / "profiles/M.json").read_text())
+        with self.assertRaises(ValueError):
+            adapt(profile, {}, self.hardware(9.0))
+
+
+class CurrentBuild(unittest.TestCase):
+    """A current engine is not rebuilt (START-HERE.cmd builds it during the download, INSTALL.cmd reuses it)."""
+
+    def test_rebuild_only_when_needed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            with patch.object(setup_entry, "ROOT", root):
+                self.assertFalse(setup_entry.engine_is_current({}))   # no environment yet
+                (root / ".venv/Scripts").mkdir(parents=True)
+                (root / ".venv/Scripts/python.exe").write_bytes(b"")
+                with patch("runtime.check_build", return_value={}):
+                    self.assertTrue(setup_entry.engine_is_current({}))
+                with patch("runtime.check_build", side_effect=RuntimeError("GPU architecture changed")):
+                    self.assertFalse(setup_entry.engine_is_current({}))
+                built = dict(cuda_root=str(root / "CUDA/v13.2"), cuda_version="release 13.2, V13.2.78\n")
+                nvcc = root / "CUDA/v13.2/bin/nvcc.exe"
+                with patch("runtime.check_build", return_value=built):
+                    self.assertTrue(setup_entry.engine_is_current({}, nvcc, "release 13.2, V13.2.78"))
+                    # a new toolkit (e.g. 13.2 Update 2 for RTX 50-series) or another install path is rebuilt
+                    self.assertFalse(setup_entry.engine_is_current({}, nvcc, "release 13.2, V13.2.86"))
+                    self.assertFalse(setup_entry.engine_is_current({}, root / "Other/bin/nvcc.exe", "release 13.2, V13.2.78"))
+
+
 if __name__ == "__main__":
     unittest.main()

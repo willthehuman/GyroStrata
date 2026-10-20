@@ -78,6 +78,26 @@ def vcvars():
     return str(result)
 
 
+def engine_is_current(hardware, nvcc=None, nvcc_version=None):
+    """True when build-engine matches this GPU, the source and patch pins, its recorded binary hashes and (when given)
+    the CUDA toolkit selected now: a changed toolkit, e.g. 13.2 Update 2 for RTX 50-series, is always rebuilt."""
+    if not (ROOT / ".venv/Scripts/python.exe").is_file():
+        return False
+    from runtime import check_build
+
+    try:
+        build = check_build(hardware)
+        if nvcc is not None:
+            recorded = pathlib.Path(build["cuda_root"]).resolve()
+            if os.path.normcase(str(recorded)) != os.path.normcase(str(pathlib.Path(nvcc).resolve().parents[1])):
+                return False
+        if nvcc_version is not None and build.get("cuda_version", "").strip() != nvcc_version.strip():
+            return False
+        return True
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return False
+
+
 def check_blackwell_toolkit(nvcc_version, arch):
     # CUDA 13.2 before Update 2 (nvcc V13.2.86) drops a byte mask in the TQ2_T decoder for sm_100 and newer. The
     # pinned llama.cpp prompt kernels contain the same code and are not patched here, so require the fixed toolkit.
@@ -126,6 +146,11 @@ def main():
         help="Remove API authentication from an existing installation without rebuilding",
     )
     p.add_argument("--skip-weight-hash", action="store_true")
+    p.add_argument(
+        "--build-only",
+        action="store_true",
+        help="Fetch the pinned sources and build the engine without the model (START-HERE.cmd runs it during the download)",
+    )
     add_tuning_arguments(p)
     a = p.parse_args()
     if os.name != "nt":
@@ -156,6 +181,8 @@ def main():
     if not shutil.which("git"):
         raise RuntimeError("Install Git for Windows, then rerun INSTALL.cmd.")
     if a.backend == 'hip':
+        if a.build_only:
+            raise RuntimeError("--build-only is for NVIDIA installs; on AMD run INSTALL.cmd --backend hip once the model is downloaded.")
         from amd_setup import install as install_hip
         return install_hip(a)
     from hardware import resource_info, adapt
@@ -176,13 +203,23 @@ def main():
         ]
         if getattr(a, key) is not None
     }
+    # Checking and building need the fixed requirements (GPU, driver, 32 GB RAM) but not the RAM and VRAM that are free
+    # right now: those are checked again when the model is installed and at every launch.
+    building_only = a.check or a.build_only
     adapt(
         json.loads((ROOT / "profiles/M.json").read_text(encoding="utf-8-sig")),
         {},
-        hardware,
+        dict(hardware, available_ram_gib=max(hardware["available_ram_gib"], 64.0),
+             gpu=dict(gpu, used_mib=0)) if building_only else hardware,
         a.workers,
         tuning,
     )
+    if building_only and hardware["available_ram_gib"] < 14:
+        print(
+            "Note: only %.1f GiB of RAM is free now; the model needs 14 GiB free when it is installed and started."
+            % hardware["available_ram_gib"],
+            flush=True,
+        )
     cuda = pathlib.Path(os.environ.get("CUDA_PATH", ""))
     nvcc = (
         str(cuda / "bin/nvcc.exe")
@@ -221,6 +258,29 @@ def main():
         return
     from runtime import require_free_port, run_batch
 
+    def run(*args, **kwargs):
+        subprocess.run([str(x) for x in args], check=True, **kwargs)
+
+    def build_engine():
+        if engine_is_current(hardware, nvcc, nvcc_version):
+            print("The engine build already matches this GPU, the source pins and the CUDA toolkit; not rebuilding.", flush=True)
+            return
+        if shutil.disk_usage(ROOT).free < 4 * 2**30:
+            raise RuntimeError(
+                "Leave at least 4 GiB free on the engine drive for sources, packages and build files."
+            )
+        run(sys.executable, ROOT / "recipe.py", "sources")
+        env = os.environ.copy()
+        env.update(GYRO_PYTHON=sys.executable, GYRO_VCVARS=compiler, GYRO_GPU_ID=str(a.gpu))
+        env["CUDA_PATH"] = str(pathlib.Path(nvcc).parents[1])
+        env["CUDA_VISIBLE_DEVICES"] = gpu["uuid"]
+        env["PATH"] = str(pathlib.Path(nvcc).parent) + os.pathsep + env.get("PATH", "")
+        run_batch(ROOT / "build.cmd", cwd=ROOT, env=env)
+
+    if a.build_only:
+        build_engine()
+        print("The engine is ready for this GPU; the model is installed once its download has finished.", flush=True)
+        return
     require_free_port("0.0.0.0", 8080)
     saved_dir = ROOT / ".model-dir"
     modeldir = select_model_directory(a.model_dir, saved_dir)
@@ -255,22 +315,8 @@ def main():
                     "Wrong model SHA256. The existing file was left untouched; use the pinned model revision."
                 )
         verified[filename] = (path.stat().st_size, path.stat().st_mtime_ns)
-    if shutil.disk_usage(ROOT).free < 4 * 2**30:
-        raise RuntimeError(
-            "Leave at least 4 GiB free on the engine drive for sources, packages and build files."
-        )
     saved_dir.write_text(str(modeldir), encoding="utf-8")
-
-    def run(*args, **kwargs):
-        subprocess.run([str(x) for x in args], check=True, **kwargs)
-
-    run(sys.executable, ROOT / "recipe.py", "sources")
-    env = os.environ.copy()
-    env.update(GYRO_PYTHON=sys.executable, GYRO_VCVARS=compiler, GYRO_GPU_ID=str(a.gpu))
-    env["CUDA_PATH"] = str(pathlib.Path(nvcc).parents[1])
-    env["CUDA_VISIBLE_DEVICES"] = gpu["uuid"]
-    env["PATH"] = str(pathlib.Path(nvcc).parent) + os.pathsep + env.get("PATH", "")
-    run_batch(ROOT / "build.cmd", cwd=ROOT, env=env)
+    build_engine()
     for filename, stamp in verified.items():
         path = modeldir / filename
         if (path.stat().st_size, path.stat().st_mtime_ns) != stamp:

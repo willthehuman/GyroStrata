@@ -2,7 +2,7 @@
   "strata": {
     "url": "https://github.com/Niko1221/Strata.git",
     "revision": "477ac13cbe8e582c20484871ce459d20d82df09d",
-    "patch_sha256": "a7ba353beb02efc6bdd6d921397996dfdf6d23dd52f1a97f74c9dbdc0e33bd68",
+    "patch_sha256": "f9edeb200ed8af4e89fcd9f11699dbc5c8e9aa4ee162c2f6a7fa773708763ad5",
     "patched_file_sha256": {
       "CMakeLists.txt": "c4554be002613bc0146a44ccc3b443545c74f9508e72fd1c5f7354457296d298",
       "include/strata/artifact/gguf_reader.hpp": "7ffde4a815202cdf5408687c9fc6b08a799e48a9d040314414eefb8211611b35",
@@ -20,7 +20,7 @@
       "include/strata/program/conv_cache.hpp": "8de2eddecfe1423f797448061d63a63c667e42493d898c3b28e84c6538fe9292",
       "include/strata/spec/draft_policy.hpp": "8f8e14a5c28afc81c0e40776e464c01428d63b482f0f245d8626052e4b28dd4e",
       "serve/server.py": "693fa2b0d076f19ded0ff67411d86cd3a22a30aadf029c48459cb36b1328a11b",
-      "src/core/expert_source.cpp": "0baaa9c8a679acab81074bbf714f0237178f80c392eaf208aa0753651116156f",
+      "src/core/expert_source.cpp": "5fa99d1ba62c2a1a1e0957c198972e54a6905688b08b9678cbc153d2ce956955",
       "src/core/peer_experts.cpp": "14b5c42f7e970e1ad7f2fd999c3083512247089e5e10636d6192a6b3d25e66fe",
       "src/core/remote_experts.cpp": "66a544e0f398cb9bd83fbbdce9dffaccf01f7b3d01ef5536baca322501a0a8f0",
       "src/core/verify.cpp": "a6c08efbf3804f0f64c76afb2e8dff889d723a036916ab358ac0cf33c7137cd4",
@@ -44,7 +44,7 @@
       "src/program/generate.cpp": "e8ee1b7c3a6ba464c3969f26986e6a7c1aecf8fe7b6cadde99a425fadc672f53",
       "src/spec/draft_policy.cpp": "97545e58ba02df60b5b692a4096855cf0fe08950cf92bd3ee72e2fdbc54a3984",
       "tests/core/async_job_test.cpp": "8769db329954afd8ba2f4285257472bf4fe9ff048ae72df851d1cbdd642daafc",
-      "tests/core/file_expert_source_test.cpp": "e121c7bdcb6594608254ab2e405d2956e1290ff81eecf74b69aacd59442d8793",
+      "tests/core/file_expert_source_test.cpp": "78a00b186dc23c92ab3414f5b7ffb432ef97a1b155b64f35afc11350a28b09e5",
       "tests/hip/prefill_mmq_parity.cpp": "9a889062ea0892af84828f281c8de1c20b36173882e80e68f901b8642a0ec5fd",
       "third_party/ggml/ggml-common-tq.h": "b91026a8c20189e07750370fccb23c5651aeb10c4a334f9c4f811b365260ff5b",
       "tools/check_isa_guard.py": "86ac3ec0b65a71443ac27176a713433c496954a123bfaf51596d48b4393a97b8",

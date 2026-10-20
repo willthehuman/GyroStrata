@@ -5,6 +5,8 @@ import argparse, copy, csv, json, math, os, re, subprocess
 GPU_LIMIT_MIB = 11776
 RAM_FLOOR_MIB = 512
 MIN_DRIVER_MAJOR = 580
+CUDA_RESERVE_MIB = 1216
+CONVERSATION_32GB_MIB = 3072
 
 
 def gpu_info(index=None, backend=None):
@@ -175,6 +177,12 @@ def adapt(profile, environment, hardware, workers=None, tuning=None):
             raise ValueError("Task override must be an integer from 64 to 4096.")
     set_arg("--pool-tasks", tasks)
     set_arg("--conversation-cache-min-free-mib", 1024 if backend == 'hip' else RAM_FLOOR_MIB)
+    # Parked conversations only check the RAM floor when they are parked, so on 32 GB a 4 GiB cache let a 128K
+    # follow-up fall under the launcher's 512 MiB floor. 3 GiB still parks one near-256K conversation (2.7 GB).
+    conversation = int(cfg["args"][cfg["args"].index("--conversation-cache-mib") + 1])
+    if hardware["ram_gib"] < 48:
+        conversation = min(conversation, CONVERSATION_32GB_MIB)
+    set_arg("--conversation-cache-mib", conversation)
     fraction = tuning.get("pcie_fraction", 0.75)
     if (
         isinstance(fraction, bool)
@@ -191,7 +199,8 @@ def adapt(profile, environment, hardware, workers=None, tuning=None):
         at = cfg['args'].index('--pcie-frac')
         del cfg['args'][at:at+2]
         fraction = 'auto'
-    base_reserve = tuning.get("vram_reserve_mib", 2048 if backend == 'hip' else 1024)
+    # 1024 put a 12 GB card with ~1.5 GB of desktop VRAM over the guard on its first request; 1216 measured safe.
+    base_reserve = tuning.get("vram_reserve_mib", 2048 if backend == 'hip' else CUDA_RESERVE_MIB)
     if type(base_reserve) is not int or not 1024 <= base_reserve <= 8192:
         raise ValueError("VRAM reserve must be an integer from 1024 to 8192 MiB.")
     # Larger GPUs may use the engine, but its absolute 11.5 GiB GPU cap stays fixed.
@@ -215,6 +224,7 @@ def adapt(profile, environment, hardware, workers=None, tuning=None):
         ram_floor_mib=RAM_FLOOR_MIB,
         pool_tasks=tasks,
         pcie_fraction=fraction,
+        conversation_cache_mib=conversation,
         vram_reserve_mib=base_reserve + max(0, gpu["total_mib"] - 12288),
         tuning_overrides=tuning,
         backend=backend,

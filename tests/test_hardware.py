@@ -11,7 +11,7 @@ class ResourcePolicy(unittest.TestCase):
     def test_general_hosts(self):
         for arch, cores, available, total in [
             ("86", 6, 24, 12288),
-            ("89", 20, 28, 12282),
+            ("89", 16, 28, 12280),
             ("120", 16, 18, 12288),
             ("86", 8, 14, 12288),
             ("89", 12, 28, 16384),
@@ -35,7 +35,11 @@ class ResourcePolicy(unittest.TestCase):
                 self.assertLessEqual(choice["ram_experts_gib"], min(16, available - 10))
                 self.assertLessEqual(choice["gpu_limit_mib"], 11776)
                 self.assertEqual(
-                    choice["vram_reserve_mib"], 1024 + max(0, total - 12288)
+                    choice["vram_reserve_mib"], 1216 + max(0, total - 12288)
+                )
+                self.assertEqual(choice["conversation_cache_mib"], 3072)
+                self.assertEqual(
+                    cfg["args"][cfg["args"].index("--conversation-cache-mib") + 1], "3072"
                 )
                 self.assertEqual(choice["pcie_fraction"], 0.75)
                 self.assertEqual(
@@ -51,6 +55,17 @@ class ResourcePolicy(unittest.TestCase):
                 self.assertLessEqual(choice["pool_tasks"], 192)
                 self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "GPU-TEST")
                 self.assertEqual(json.dumps(original, sort_keys=True), before)
+
+    def test_conversation_cache_follows_ram(self):
+        h = dict(
+            gpu=dict(name="TEST", total_mib=12288, used_mib=512, arch="89", uuid="GPU-TEST"),
+            physical_cores=8,
+            ram_gib=63.9,
+            available_ram_gib=50,
+        )
+        profile = json.loads((ROOT / "profiles/M.json").read_text())
+        cfg, env, choice = adapt(profile, {}, h)
+        self.assertEqual(choice["conversation_cache_mib"], 4096)
 
     def test_insufficient_resources_rejected(self):
         baseline = dict(

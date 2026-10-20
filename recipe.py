@@ -136,7 +136,8 @@ def sources(args):
             != expected
         ):
             raise RuntimeError(
-                "Patched source differs: " + relative + "; local files were preserved."
+                "Patched source differs: " + relative + "; local files were preserved. If this engine folder was "
+                "updated in place to a new release, install the new release into a fresh folder (UPDATING.md)."
             )
     print(
         "Pinned sources ready and patch hashes verified. Weights were not downloaded."
@@ -452,7 +453,7 @@ def install_locked(args):
         print(
             "Installed",
             cmd.name,
-            "with a generated key in .gyro-recipe/api-key.txt"
+            "with the API key in .gyro-recipe/api-key.txt"
             if args.api_key
             else "without API authentication",
         )

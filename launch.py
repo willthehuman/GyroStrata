@@ -9,6 +9,7 @@ import time
 import psutil
 
 from hardware import resource_info, adapt
+from tuning import apply_file as apply_tuning
 from runtime import (
     check_build,
     check_config,
@@ -53,13 +54,16 @@ def run_profile(path, check=False):
         cfg.get("_recipe_workers"),
         cfg.get("_recipe_tuning"),
     )
+    tuned = apply_tuning(cfg, values, path, hardware, selection)
     env = engine_environment(values, build)
     if check:
+        print(tuned, flush=True)
         print("PASS: model, pack, source, build, port and resource checks.", flush=True)
         return 0
     launch_config = path.with_name(path.stem + ".launch.json")
     write_json(launch_config, cfg)
     print("Resource settings:", json.dumps(selection), flush=True)
+    print(tuned, flush=True)
     auth = (
         "key file: " + str(path.parent / "api-key.txt")
         if cfg.get("api_key")

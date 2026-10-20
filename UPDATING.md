@@ -2,9 +2,11 @@
 
 ## Users
 
-Install a new release into a **new permanent engine folder**, keeping the old one. Reuse the same verified GGUF if the model pin is unchanged. Saved packs are reused only when their format and provenance pass validation.
+Install a new release into a **new permanent engine folder** (a fresh clone or ZIP; do not `git pull` into an installed folder, whose patched sources belong to the old release), keeping the old one. Reuse the same verified GGUF if the model pin is unchanged. Saved packs are reused only when their format and provenance pass validation.
 
 Installation keeps matched backups under .gyro-recipe/rollback/<timestamp>/ beside the launcher. To roll back, stop the server and restore the matching profile JSON, environment JSON and CMD from one backup. Keep the engine/source/build folder those files reference. Do not mix backup versions. Moving the model/engine folder or changing GPU architecture requires reinstalling.
+
+TUNE.cmd results (.gyro-recipe/M.tune.json) survive reinstalls. They are ignored, with a note at launch, after a GPU, RAM, CPU or engine-patch change, or when less RAM is free than when they were measured; run TUNE.cmd again then, or delete the file to use the profile's defaults.
 
 Installs are keyless by default; --api-key opts in. A keyless install removes saved keys from Gyro-M configuration copies, without touching pack/tokenizer data.
 

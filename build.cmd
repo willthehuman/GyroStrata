@@ -23,7 +23,7 @@ for /f "delims=" %%A in ('.venv\Scripts\python.exe hardware.py arch') do set "GY
 if not defined GYRO_CUDA_ARCH exit /b 1
 "%GYRO_CMAKE%" -S sources\strata -B build-engine -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=%GYRO_CUDA_ARCH% -DCMAKE_MAKE_PROGRAM="%GYRO_NINJA%" -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_TESTS=ON -DSTRATA_GGML_DIR="%GYRO_RECIPE_ROOT%sources\llama"
 if errorlevel 1 exit /b 1
-"%GYRO_CMAKE%" --build build-engine --target strata draft_policy_test native_expert_parity kv_stream_parity async_job_test conv_cache_test file_expert_source_test tq_cpu_parity native_hadamard_test -j 4
+"%GYRO_CMAKE%" --build build-engine --target strata draft_policy_test native_expert_parity kv_stream_parity async_job_test conv_cache_test file_expert_source_test tq_cpu_parity native_hadamard_test pool_tasks_test -j 4
 if errorlevel 1 exit /b 1
 build-engine\draft_policy_test.exe
 if errorlevel 1 exit /b 1
@@ -38,6 +38,8 @@ if errorlevel 1 exit /b 1
 build-engine\file_expert_source_test.exe --ram-rebalance-gpu
 if errorlevel 1 exit /b 1
 build-engine\native_hadamard_test.exe
+if errorlevel 1 exit /b 1
+build-engine\pool_tasks_test.exe
 if errorlevel 1 exit /b 1
 build-engine\tq_cpu_parity.exe
 if errorlevel 1 exit /b 1

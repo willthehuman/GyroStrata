@@ -586,7 +586,7 @@ index 2e805773dc56788bfe2f899bc7a78f20bd6db553..814fbadad9bd30b0874c34d2f0f8dfe2
                  v = tune.get(k)
                  if isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= float(v) <= 1.0:
 diff --git a/src/core/expert_source.cpp b/src/core/expert_source.cpp
-index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f8f161653 100644
+index d3fefeeffb639675bedcc65e268ecc7f45147e71..b4fc2636e52ba096601569577aeb9abad6cdd7a1 100644
 --- a/src/core/expert_source.cpp
 +++ b/src/core/expert_source.cpp
 @@ -1,5 +1,6 @@
@@ -615,7 +615,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
      struct Window { int file; uint64_t a0, size, skip, n, at; uint8_t* dst; size_t req; uint64_t in_req; };
      struct Req { HANDLE h; uint64_t a0, size, pos; };
      // this thread's aligned buffer and events, kept for its next batch
-@@ -3530,6 +3541,43 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
+@@ -3530,6 +3541,49 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
      return resident_blob(index);   // through the rotation's ownership table when STRATA_EXCHANGE_ROTATE is on
  }
  
@@ -649,8 +649,14 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
 +        buffer.resize(size_t(bytes));
 +        if(!copy_from_files(m.layer,int64_t(m.hot)%n_expert_,buffer.data()))continue;
 +        // All source bytes were read successfully before touching the existing slot.
++        // A Foresight slot may copy (or have copied) out of the cold expert's place: drop it before the place is
++        // rewritten, as replace_resident does, so the cold expert is never served the hot expert's bytes.
++        ForesightSwap* fs=fs_swap_.load(std::memory_order_acquire);
++        const int32_t cold_expert=int32_t(int64_t(m.cold)%n_expert_);
++        if(fs!=nullptr)fs->hold(m.layer,cold_expert);
 +        std::memcpy((uint8_t*)complement_host_+size_t(at),buffer.data(),size_t(bytes));
 +        if(!detail::exchange_cache_complement(complement_offsets_,m.cold,m.hot))std::abort();
++        if(fs!=nullptr)fs->unhold(m.layer,cold_expert);
 +        ++applied;
 +    }
 +    return applied;
@@ -659,7 +665,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
  const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
      if (io_pf_ && role_ptr_.empty() && direct_.empty()) {
          if (complement_ready_ && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
-@@ -3820,6 +3868,9 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -3820,6 +3874,9 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
      if (!d.usage.empty())
          for (int64_t i = 0; i < n_tok * k; ++i)
              if (ids[i] >= 0 && ids[i] < d.n_expert) d.usage[(size_t) d.layers * (size_t) d.n_expert + (size_t) ids[i]] += 1.0f;
@@ -669,7 +675,48 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
      // ---- plan v0.3 P6: the GPU's share, decided and published FIRST so the GPU starts while the CPU works.
      // Distinct experts in routing order; resident ones and the last pcie_num/256 of the missed ones go to the GPU.
      const int64_t n = n_tok * k;
-@@ -4012,6 +4063,10 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -3851,8 +3908,31 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+         // only at rank >= R (the smallest weights of the top-10) is neither copied nor computed; its contribution is
+         // zero, without renormalisation (the others keep the weight the router gave them).  Less PCIe and CPU work.
+         const int tail_rank = tail_skip_rank();
++        // STRATA_FILE_SKIP=R (opt-in, changes the output): like the tail skip, but only for an expert that is neither in
++        // VRAM nor in the RAM copy - one the layer would wait for the SSD to read - routed by every token of the window
++        // at rank >= R.  The RAM tier's experts stay computed (CPU work, no wait).  Both may be set: either skips.
++        static const int file_rank = [] { const char* v = std::getenv("STRATA_FILE_SKIP"); const int r = v ? std::atoi(v) : 0; return r > 0 && r < 10 ? r : 0; }();
++        FileExpertSource* fsrc = file_rank > 0 ? dynamic_cast<FileExpertSource*>(d.src) : nullptr;
+         bool skip_d[kMaxWindowEntries];
+         for (int q = 0; q < nd; ++q) skip_d[q] = false;
++        if (fsrc != nullptr && d.peer == nullptr && d.remote_count == 0) {
++            int minr[kMaxWindowEntries];
++            for (int q = 0; q < nd; ++q) minr[q] = 99;
++            for (int64_t i = 0; i < n; ++i) {
++                int q = 0;
++                while (q < nd && distinct[q] != first_of[i]) ++q;
++                if (q < nd) minr[q] = std::min(minr[q], (int) (i % k));
++            }
++            for (int q = 0; q < nd; ++q) {
++                const int32_t e = ids[distinct[q]];
++                if (e < 0 || e >= d.n_expert || minr[q] < file_rank) continue;
++                if (d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] >= 0) continue;   // VRAM
++                if (fsrc->resident_blob(d.layers, e) != nullptr) continue;                             // RAM
++                skip_d[q] = true;
++                --nmiss;
++                ++d.tail_experts;
++            }
++        }
+         if (tail_rank > 0 && d.peer == nullptr && d.remote_count == 0) {
+             int minr[kMaxWindowEntries];
+             for (int q = 0; q < nd; ++q) minr[q] = 99;
+@@ -3863,7 +3943,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+             }
+             for (int q = 0; q < nd; ++q) {
+                 const int32_t e = ids[distinct[q]];
+-                if (e < 0 || e >= d.n_expert || minr[q] < tail_rank) continue;
++                if (skip_d[q] || e < 0 || e >= d.n_expert || minr[q] < tail_rank) continue;
+                 if (d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] >= 0) continue;   // resident
+                 skip_d[q] = true;
+                 --nmiss;
+@@ -4012,6 +4092,10 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
          }
      }
      const auto c2 = std::chrono::steady_clock::now();
@@ -680,7 +727,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
      if (any_cpu) {   // CS-T: the experts the CPU computes, fetched together (the GGUF in place reads them on several threads)
          static thread_local std::vector<int64_t> miss;
          miss.clear();
-@@ -4019,9 +4074,29 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4019,9 +4103,29 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
              if (kind[i] == -1 && ids[i] >= 0 && ids[i] < d.n_expert &&
                  std::find(miss.begin(), miss.end(), (int64_t) ids[i]) == miss.end())
                  miss.push_back(ids[i]);
@@ -713,7 +760,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
      for (int64_t t = 0; t < n_tok; ++t)
          for (int64_t j = 0; j < k; ++j) {
              const int64_t i = t * k + j;
-@@ -4034,6 +4109,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4034,6 +4138,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                  d.fail_expert = e;
                  return;
              }
@@ -721,7 +768,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
              if (kind[i] == -2) {            // STRATA_ROUTE_TAIL_SKIP: a skipped tail expert contributes zero
                  std::memset(row, 0, (size_t) H * sizeof(float));
                  ++d.tail_skipped;
-@@ -4050,6 +4126,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4050,6 +4155,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                      std::memset(row, 0, (size_t) H * sizeof(float));
                  continue;
              }
@@ -729,7 +776,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
              ++d.cache_refused;
              int16_t& jo = d.job_of[(size_t) e];
              if (jo < 0) {
-@@ -4074,6 +4151,17 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4074,6 +4180,17 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
              ++jb.nt;
              ++d.multi_entries;
          }
@@ -747,7 +794,7 @@ index d3fefeeffb639675bedcc65e268ecc7f45147e71..8326a5b944b8a6e31679680825acad1f
      const auto c3 = std::chrono::steady_clock::now();
      if (d.plan != nullptr) d.plan->cpu_jobs = njobs;
      pt("run", njobs);
-@@ -4103,13 +4191,13 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+@@ -4103,13 +4220,13 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
      auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
      d.ms_plan += ms(c0, c1);
      d.ms_actq += ms(c1, c2);
@@ -4106,10 +4153,10 @@ index 0000000000000000000000000000000000000000..b19cd7d2b1df0e79efe8349f3d593c93
 +    std::puts("async_job_test: PASS"); return 0;
 +}
 diff --git a/tests/core/file_expert_source_test.cpp b/tests/core/file_expert_source_test.cpp
-index c4586c871d93e0c00988b89fcc6feca8156f02fd..5fc8ed4af31ad83ab2659f03884a5e3f1724eec9 100644
+index c4586c871d93e0c00988b89fcc6feca8156f02fd..8db4bc59b77b37902607e5ddd4bd0e03f8e07352 100644
 --- a/tests/core/file_expert_source_test.cpp
 +++ b/tests/core/file_expert_source_test.cpp
-@@ -908,10 +908,49 @@ void test_replace_resident(bool pin) {
+@@ -908,10 +908,97 @@ void test_replace_resident(bool pin) {
      std::cout << "replace_resident: pinned=" << pin << " exact_bytes=PASS\n";
  }
  
@@ -4151,11 +4198,59 @@ index c4586c871d93e0c00988b89fcc6feca8156f02fd..5fc8ed4af31ad83ab2659f03884a5e3f
 +    require(src.rebalance_ram({},heat,4)==0,"invalid geometry must be refused");
 +}
 +
++// STRATA_RAM_REBALANCE beside the Foresight swap space: a slot copied from a cold expert's RAM place must not be served
++// once rebalance_ram has given that place to a hot expert (the slot's source bytes now belong to another expert).
++void test_foresight_rebalance() {
++    using namespace strata::core;using namespace strata::kernels::cpu;
++#if defined(_WIN32)
++    _putenv_s("STRATA_EXCHANGE_ROTATE","0");
++#else
++    setenv("STRATA_EXCHANGE_ROTATE","0",1);
++#endif
++    TempDirectory dir;std::string err;
++    require(expert_layout_load(dir.path.string(),1,5,err),err);
++    const size_t bytes=size_t(BLOB);
++    std::vector<std::vector<uint8_t>> truth(5,std::vector<uint8_t>(bytes));
++    {
++        std::ofstream out(dir.path/"experts.bin",std::ios::binary);
++        for(size_t e=0;e<5;++e){
++            for(size_t i=0;i<bytes;++i)truth[e][i]=uint8_t((i*131+e*37)^(i>>8));
++            out.write((const char*)truth[e].data(),std::streamsize(bytes));
++        }
++        require((bool)out,"fixture write failed");
++    }
++    FileExpertSource src;ExpertCache cache;
++    require(src.open(dir.path.string(),1,5,err),err);
++    require(cache.open(2,1,5,BLOB,err),err);
++    for(int e:{2,3}){const int slot=cache.admit(0,e);require(slot>=0 && cache.fill_slot_blocking(slot,truth[e].data(),err),err);}
++    std::vector<std::pair<int32_t,int32_t>> rank;
++    for(int e:{0,1,4,2,3})rank.push_back({0,e});
++    require(src.pin_cache_complement(cache,err,true,{},-1,0,2*bytes,&rank),err);
++    require(src.pinned(0,0),"expert 0 is not in the pinned RAM copy");
++    int dev=0;cudaGetDevice(&dev);
++    ForesightSwap fs;
++    require(fs.init(1,1,5,{0},{dev},err),err);
++    fs.verify=true;
++    src.set_foresight_swap(&fs);
++    fs.note_miss(&src,0,0);                                       // expert 0 -> the slot, copied from its RAM place
++    std::this_thread::sleep_for(std::chrono::milliseconds(200));  // let the copy land; take() is not called yet
++    std::vector<int32_t> gpu{-1,-1,0,1,-1};std::vector<float> heat{0,1,1000,1000,30};
++    require(src.rebalance_ram(gpu,heat,1)==1,"one hot file blob must replace expert 0's RAM place");
++    require(std::memcmp(src.resident_blob(0,4),truth[4].data(),bytes)==0,"promoted bytes corrupted");
++    unsigned long long ptr=0;
++    const bool served=fs.take(0,0,ptr);
++    require(!served,"a Foresight slot copied from a rebalanced RAM place was served");
++    require(fs.verify_bad==0,"verify found a slot whose source bytes were rewritten under it");
++    src.set_foresight_swap(nullptr);
++    std::cout<<"foresight rebalance: dropped "<<fs.dropped<<", "<<fs.report()<<": PASS\n";
++    src.close();
++}
++
  }  // namespace
  
  int main(int argc, char** argv) {
      try {
-+        if(argc==2 && std::string(argv[1])=="--ram-rebalance-gpu"){test_ram_rebalance();std::cout<<"RAM rebalance integrity: PASS\n";return 0;}
++        if(argc==2 && std::string(argv[1])=="--ram-rebalance-gpu"){test_ram_rebalance();std::cout<<"RAM rebalance integrity: PASS\n";test_foresight_rebalance();return 0;}
          test_complement_plan();
          test_resident_lend_region();
          test_split_lend_regions();
