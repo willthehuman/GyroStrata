@@ -1,12 +1,12 @@
 # Tuning Gyro-M for speed
 
-This page explains how GyroStrata gets its speed and how TUNE.cmd measures it. It records the recipe that took one
+This page explains how GyroStrata gets its speed and how TUNE.cmd measures it. It records the recipe that took my
 12 GB / 32 GB PC from **about 16 to 33-37 output tok/s on real reasoning** (32K context), how it was measured, and how to repeat it.
 
 ## The short version
 
 1. **START-HERE.cmd already tunes your PC** as its last step (about 10-15 minutes). Without tuning, the shipped profile
-   uses the recipe below, which is the reference PC's result.
+   uses the recipe below, which is the result on my PC.
 2. To measure again (new hardware, more RAM, or another quality level), run **TUNE.cmd**:
 
    ```powershell
@@ -43,7 +43,7 @@ it says so and uses the profile's defaults. Tune with your usual apps open, not 
 The reference text is one sample of reasoning, though: on other text the cost can differ by about 0.006 (its standard
 error), and it grows with the length of the text, because skipped experts change the state later tokens build on.
 
-Runs on the reference PC (all chose file 3 + tail 6 under the balanced budget):
+Runs on my PC (all chose file 3 + tail 6 under the balanced budget):
 
 | Run | Experts in RAM | Settings read | Minutes | file 3 + tail 6 dNLL | PCIe share kept |
 |---|---:|---:|---:|---:|---|
@@ -52,7 +52,7 @@ Runs on the reference PC (all chose file 3 + tail 6 under the balanced budget):
 | first tuner, repeated | 14 GiB | 24 | 27 | +0.0138 | engine probe (+3.8-4.3%) |
 | **current tuner** | 14 GiB | 8 + 1 PCIe engine | **11.3** (7.3 + 2.1 + 2) | +0.0138 | 0.55 (+3.5-4.8%) |
 
-Report of the current tuner on the reference PC:
+Report of the current tuner on my PC:
 
 ```text
   experts on the SSD: yes (file-skip settings)
@@ -76,7 +76,7 @@ did. The first tuner's `--confirm` reply measured 20.2 tok/s with skipping off a
 ## What decides the speed on 12 GB VRAM / 32 GB RAM
 
 Gyro-M's experts do not fit in VRAM + RAM. During a real reasoning reply, each token's 48 MoE layers find most of
-their experts in VRAM, some in RAM (computed by the CPU), and a few only on the SSD. Measured on the reference PC at
+their experts in VRAM, some in RAM (computed by the CPU), and a few only on the SSD. Measured on my PC at
 32K context, one decode step took about 68.5 ms:
 
 | Part of a decode step | Time |
@@ -100,7 +100,7 @@ Shipped default: **STRATA_FILE_SKIP=3 + STRATA_ROUTE_TAIL_SKIP=6** ("balanced").
 cache 3 GiB on 32 GB RAM (4 GiB let a 128K follow-up hit the 512 MiB RAM floor), VRAM reserve 1216 MiB (1024 put a
 12 GB card with a busy desktop over the guard on its first request).
 
-## Measured data (reference PC, 2026-10-19)
+## Measured data (my PC, 2026-10-19)
 
 One desktop with a 12 GB NVIDIA GPU (PCIe 4.0 x16), 32 GB RAM and a PCIe 4.0 NVMe SSD, Windows 11.
 

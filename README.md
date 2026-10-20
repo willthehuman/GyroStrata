@@ -4,10 +4,9 @@ Run **Gyro-M** (Qwen3.8 Flash Next, 256K context) on an ordinary Windows PC with
 GyroStrata is a patched, pinned build of [Strata](https://github.com/Niko1221/Strata): the model's experts are spread
 across VRAM, RAM and the SSD, and the launcher keeps the PC inside safe memory limits.
 
-> **Speed disclaimer.** On the reference PC (a 12 GB NVIDIA GPU, 32 GB RAM and a PCIe 4.0 NVMe SSD),
-> real reasoning replies ran at **about 16 tok/s** with the previous release (1.1.0) and run at
-> **33-37 tok/s at 32K context and 30-34 tok/s at 128K** with this one. Your speed depends on your GPU, CPU, RAM
-> and especially your SSD; other PCs have not been measured. START-HERE.cmd measures and tunes yours.
+> **Speed disclaimer.** Measured on my PC (12 GB NVIDIA GPU, 32 GB RAM, PCIe 4.0 NVMe SSD): real reasoning replies
+> ran at **about 16 tok/s** with 1.1.0 and run at **33-37 tok/s at 32K context and 30-34 tok/s at 128K** with 1.2.0.
+> Your speed depends on your GPU, CPU, RAM and especially your SSD. START-HERE.cmd measures and tunes your PC.
 
 ## Setup in 4 steps
 
@@ -41,14 +40,14 @@ More detail: [HARDWARE.md](HARDWARE.md).
 ### Compatibility
 
 - **NVIDIA (CUDA): supported.** The engine is compiled on your PC for your card. All speeds in this README come from
-  one 12 GB / 32 GB PC; other NVIDIA cards, CPUs, RAM and SSDs have not been measured and will differ.
+  my PC; other NVIDIA cards, CPUs, RAM and SSDs have not been measured and will differ.
 - **AMD (HIP): experimental, not verified.** Strata supports AMD, and GyroStrata has an AMD install path
   ([AMD.md](AMD.md)) that uses the same engine source, including this release's changes (they contain no CUDA-only
   code). But it has only been tested with simulated hardware: it has not been built or run on a real AMD GPU, so it
   may not work. START-HERE.cmd is NVIDIA-only; AMD users follow AMD.md.
 - **The tuner adapts, but is not proven everywhere.** TUNE.cmd measures your own PC, keeps the memory guards on and
   stays within its quality budget for the free RAM it measured with; with less free RAM, or if it cannot run, the
-  shipped defaults are used. It has run on one PC so far.
+  shipped defaults are used. It has only run on my PC so far.
 
 ### Running the steps yourself
 
@@ -77,8 +76,9 @@ The server listens on **0.0.0.0**, so other devices on your network can reach it
 ## How it gets its speed
 
 Gyro-M's experts do not fit in 12 GB VRAM + 32 GB RAM, so some are read from the SSD while a reply is written. Waiting
-for those reads was more than half of every decode step. This release skips the experts that matter least - those the
-router ranks lowest and that are not in VRAM or RAM - instead of waiting for them:
+for those reads was more than half of every decode step. This release skips the experts that matter least instead of
+waiting for them: of the 10 experts the router picks for each token, the 4 weakest are skipped when they are not in
+VRAM, and the 7 weakest when they would have to be read from the SSD:
 
 | Quality level | Settings | Mean NLL change | Use |
 |---|---|---:|---|
@@ -91,33 +91,28 @@ level with `TUNE.cmd --quality exact|balanced|fast`. The full data and method ar
 
 ## Speeds
 
-Measured on the reference PC only. Real work: the engine's own C++ sources as the context, a code-review question,
-thinking on, the default sampling, 6,144-token replies, then a follow-up question in the same conversation.
+Measured on my PC: 12 GB NVIDIA GPU, 32 GB RAM, PCIe 4.0 NVMe SSD. Your speeds will differ.
 
-| Real reasoning | 1.1.0 (no skipping) | 1.2.0 (balanced) |
+**Reply speed** (long reasoning replies, thinking on):
+
+| Context | v1.1.0 | v1.2.0 |
 |---|---:|---:|
-| 32K context, first reply | 15.9-16.7 tok/s | **33.3-37.0 tok/s** |
-| 32K context, follow-up | 15.2-16.0 tok/s | **32.8-34.8 tok/s** |
-| 128K context, first reply | 15.8 tok/s | **31.8-34.1 tok/s** |
-| 128K context, follow-up | stopped (RAM floor) | **30.3-32.2 tok/s** |
+| 32K, first reply | 16-17 tok/s | **33-37 tok/s** |
+| 32K, follow-up | 15-16 tok/s | **33-35 tok/s** |
+| 128K, first reply | 16 tok/s | **32-34 tok/s** |
+| 128K, follow-up | stopped (out of RAM) | **30-32 tok/s** |
 
-Context points (`benchmarks\context-grid.py`): synthetic Python continuation, thinking off, 256-token replies, a cold
-reply plus three that reuse the prompt. Code continuation repeats itself, so speculative decoding makes these output
-rates higher than reasoning speed.
+**Prompt reading and first token** (v1.2.0):
 
-| Context | Prefill tok/s | Output tok/s, 1.1.0 | Output tok/s, 1.2.0 | First token (new prompt) | First token (cached) |
-|---|---:|---:|---:|---:|---:|
-| 8K | 877 | 21.6 | **54.3** | 9.4 s | 0.22 s |
-| 32K | 1,282 | 30.7 | **58.9** | 25.6 s | 0.29 s |
-| 64K | 1,448 | 29.6 | **60.1** | 45.3 s | 0.47 s |
-| 128K | 1,577 | 36.7 | **58.1** | 83.2 s | 0.59 s |
-| 192K | 1,598 | 34.8 | **56.8** | 123.1 s | 0.72 s |
-| Near 256K | 1,589 | 34.1 | **56.7** | 164.4 s | 0.86 s |
+| Prompt length | Reading speed | First token, new prompt | First token, same prompt again |
+|---|---:|---:|---:|
+| 8K | 877 tok/s | 9.4 s | 0.2 s |
+| 32K | 1,282 tok/s | 25.6 s | 0.3 s |
+| 64K | 1,448 tok/s | 45.3 s | 0.5 s |
+| 128K | 1,577 tok/s | 83.2 s | 0.6 s |
+| 192K | 1,598 tok/s | 123.1 s | 0.7 s |
+| About 256K | 1,589 tok/s | 164.4 s | 0.9 s |
 
-One full run each (2026-10-19, same PC, v0.1.45 engine). Long-context recall, arithmetic and returning to a cached
-256K conversation passed. Peak GPU memory 11,283 MiB of the 11,776 MiB guard; lowest free RAM 1.9 GB.
-
-The 32K GPU cache does **not** limit attention to 32K. Leave room for the reply within 256K.
 
 ## Safety limits
 
@@ -126,6 +121,7 @@ The 32K GPU cache does **not** limit attention to 32K. Leave room for the reply 
 - Default VRAM reserve 1216 MiB; conversation cache 3 GiB on 32 GB RAM (4 GiB from 48 GB).
 - Q4 KV cache and the BF16 pack conversions have small precision costs; expert skipping has the measured cost above.
 - MTP and vision are off. Thinking is on without a budget; earlier thinking is removed from the history.
+- The 32K GPU cache does **not** limit attention to 32K. Leave room for the reply within 256K.
 
 ## Documentation
 
