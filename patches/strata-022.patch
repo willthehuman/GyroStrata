@@ -1,0 +1,771 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7c686766845c1e02d277ae1c85bc76f0fd39b76b..85279b6f99aad049165e2d58c47be328b357d4d4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,6 @@
+-﻿# Strata Engine - top-level build (P1.S1).
++# Strata Engine - top-level build (P1.S1).
+ #
+-# Targets (phase-1 Ă‚Â§P1.S1): `strata_artifact` (no CUDA dependency), `tests`.  `strata_plan` and the C++
++# Targets (phase-1 §P1.S1): `strata_artifact` (no CUDA dependency), `tests`.  `strata_plan` and the C++
+ # `strata-pack` are added when their sources exist - a target with no sources would make the build graph
+ # claim something the tree does not have, which is worse than an absent target.
+ #
+@@ -1438,6 +1438,10 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
+   target_include_directories(split_ring_test PRIVATE include)
+   add_test(NAME split_ring_test COMMAND split_ring_test)
+   # the serve loop's conversation-cache retention policy (header-only, no library to link)
++  add_executable(async_job_test tests/core/async_job_test.cpp)
++  target_include_directories(async_job_test PRIVATE include)
++  target_link_libraries(async_job_test PRIVATE Threads::Threads)
++  add_test(NAME async_job_test COMMAND async_job_test)
+   add_executable(conv_cache_test src/program/conv_cache_test.cpp)
+   target_include_directories(conv_cache_test PRIVATE include)
+   add_test(NAME conv_cache_test COMMAND conv_cache_test)
+diff --git a/include/strata/core/async_job.hpp b/include/strata/core/async_job.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ab5f56580cc85265d0845cf0add92e141a6849f
+--- /dev/null
++++ b/include/strata/core/async_job.hpp
+@@ -0,0 +1,52 @@
++#pragma once
++#include <condition_variable>
++#include <exception>
++#include <functional>
++#include <mutex>
++#include <stdexcept>
++#include <thread>
++
++namespace strata::core {
++// One persistent worker, one outstanding job. Await before releasing captured data.
++class AsyncJob {
++    std::mutex mu_;
++    std::condition_variable wake_, done_;
++    std::function<void()> job_;
++    std::exception_ptr error_;
++    bool pending_ = false, stopping_ = false;
++    std::thread thread_;
++public:
++    AsyncJob() : thread_([this] {
++        std::unique_lock<std::mutex> lk(mu_);
++        for (;;) {
++            wake_.wait(lk, [&] { return pending_ || stopping_; });
++            if (!pending_) return;
++            auto job = std::move(job_);
++            lk.unlock();
++            std::exception_ptr error;
++            try { job(); } catch (...) { error = std::current_exception(); }
++            lk.lock(); error_ = error; pending_ = false; done_.notify_all();
++        }
++    }) {}
++    ~AsyncJob() {
++        { std::lock_guard<std::mutex> lk(mu_); stopping_ = true; }
++        wake_.notify_one(); thread_.join();
++    }
++    void start(std::function<void()> job) {
++        std::lock_guard<std::mutex> lk(mu_);
++        if (pending_) throw std::logic_error("AsyncJob already pending");
++        job_ = std::move(job); error_ = nullptr; pending_ = true; wake_.notify_one();
++    }
++    void wait() {
++        std::unique_lock<std::mutex> lk(mu_);
++        done_.wait(lk, [&] { return !pending_; });
++        auto error = error_; error_ = nullptr;
++        lk.unlock(); if (error) std::rethrow_exception(error);
++    }
++    struct Await {
++        AsyncJob* worker;
++        ~Await() { if (worker) try { worker->wait(); } catch (...) {} }
++        void finish() { if (worker) { auto* w = worker; worker = nullptr; w->wait(); } }
++    };
++};
++}
+diff --git a/include/strata/core/expert_source.hpp b/include/strata/core/expert_source.hpp
+index 3ab77dc2a78a41003f2d19bd7a142a264ed30d18..c135591f4920e61ea1ff1ed85f6c505292d6dd69 100644
+--- a/include/strata/core/expert_source.hpp
++++ b/include/strata/core/expert_source.hpp
+@@ -640,6 +640,8 @@ struct ExpertDispatch {
+     /// whose routed ids all look resident there publishes no activation (doorbell_publish_res) - counted
+     const int32_t* dres_check = nullptr;
+     int64_t stale_x = 0;
++    std::vector<float>* ram_heat = nullptr;  ///< request-local counts, never decayed; host pool only
++
+     int64_t multi_misses = 0;      ///< distinct (layer, expert) pairs the CPU computed in verify windows
+     int64_t multi_entries = 0;     ///< routed (token, expert) entries the CPU served in verify windows
+     /// Multi-GPU: the second GPU's tier.  Its experts are computed there instead of on the CPU (kind 2).
+@@ -812,6 +814,9 @@ public:
+     void set_foresight_swap(ForesightSwap* fs) { fs_swap_.store(fs, std::memory_order_release); }
+     /// The compact copy's blob of `(layer, expert)`, or null; not counted as a read (any thread).
+     const uint8_t* resident_blob(int64_t layer, int64_t expert) const;
++    // Only between requests after every CPU job and GPU/adaptive copy has finished.
++    // Replaces cold same-layer RAM blobs with hot file-tier blobs without growing RAM.
++    int64_t rebalance_ram(const std::vector<int32_t>& gpu, const std::vector<float>& heat, int limit);
+     int64_t exchanges() const { return exchanges_; }
+     /// STRATA_RAM_ADAPT: the compact copy gives `out`'s place to `in`, read from the file, so the RAM tier can follow
+     /// the conversation as the VRAM tier does.  Both are experts of `layer` (one blob size), `out` is held by the copy
+diff --git a/include/strata/kernels/cpu/pool.hpp b/include/strata/kernels/cpu/pool.hpp
+index 6c21d2d210a39760369f7adbf1522ef037910e25..51a62f5b0f6e17e5244761f8e55d2e6be4f17a60 100644
+--- a/include/strata/kernels/cpu/pool.hpp
++++ b/include/strata/kernels/cpu/pool.hpp
+@@ -221,6 +221,9 @@ public:
+     int numa_slices() const { return numa_n_; }
+     /// Accumulated drain time of slice `s` over the mode-5/6 phases, ms: publish to the slice's last `done`.
+     double numa_slice_ms(int s) const { return s >= 0 && s < numa_n_ ? slice_ms_[s] : 0.0; }
++    /// Change the row-task target between completed requests, with no jobs in flight.
++    /// Zero restores the automatic policy. Only the host thread may call this.
++    void set_phase_tasks(int tasks);
+     /// Whether the host thread also drains.  Reported at startup, because "the engine adapts to the machine it
+     /// is on" is only true if the engine says which adaptation it took.
+     bool host_works() const { return host_works_; }
+diff --git a/include/strata/kernels/iq_kernels.hpp b/include/strata/kernels/iq_kernels.hpp
+index ce06a9fe7e71b6e0e99a98f282bb26b076a8f062..82e0f2e45dae5f033e60df31e1cd8708990e3f44 100644
+--- a/include/strata/kernels/iq_kernels.hpp
++++ b/include/strata/kernels/iq_kernels.hpp
+@@ -118,6 +118,15 @@ void native_expert_set_expdec_params(const NativeExpertExpdecParams& p);
+ NativeExpertExpdecParams native_expert_expdec_params();
+ /// Whether EXPDEC has kernels for this layout's gate/up and down (the bench's check).
+ bool native_expert_expdec_takes(const NativeExpertLayout& L, bool& gu, bool& down);
++/// APR (prism.hadamard): y = H_block (signs * x) per block of `block` values of each of `rows` rows of `width`
++/// (x == y allowed).  `signs`: a device vector of `width` signs, or nullptr (identity).  The same floats as the CPU's
++/// hadamard_rotate.  The f16 form rotates in place, computing in float.
++void hadamard_rows(const float* x, float* y, int64_t rows, int64_t width, int block, const float* signs, void* stream);
++void hadamard_rows_f16(uint16_t* x, int64_t rows, int64_t width, int block, const float* signs, void* stream);
++/// A device copy (on the current device) of the host sign vector `host` of `width` signs, made on first use and
++/// kept for the process.  Call it at setup, not inside a CUDA graph capture.  nullptr for a nullptr `host`.
++const float* hadamard_device_signs(const float* host, int width);
++
+ /// `iq_mmvq` and `native_expert_grouped` decode each weight part once and apply it to every column / entry;
+ /// true selects the older kernels that decode it again per column (STRATA_OLD_IQ_MMVQ=1 at startup).  Both give
+ /// bitwise the same results.  Set before graph capture; captured graphs keep the kernels they captured.
+diff --git a/include/strata/program/conv_cache.hpp b/include/strata/program/conv_cache.hpp
+index d8e97f32c810aa6c1b1f5b8b5560891e77fdcc94..62f78bbbdf74620f42417ed66e350e2030982152 100644
+--- a/include/strata/program/conv_cache.hpp
++++ b/include/strata/program/conv_cache.hpp
+@@ -58,7 +58,10 @@ inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, con
+ /// from one keep coming back to it, and a least-recently-used rule would drop it while they still do.  The root and
+ /// the tail rule are as above.  When every other item is pinned too, the policy falls back to the oldest pinned one:
+ /// the cache still keeps to its `cap` (the caller limits how many pins it takes, so this is a backstop).
+-inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, const bool* tail, const bool* pinned) {
++inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, const bool* tail, const bool* pinned, bool retain_tail = false) {
++    // Retain the near-tail checkpoint by ordinary LRU when explicitly requested.
++    // A completed turn must not immediately discard the prefix its next branch needs.
++    if (retain_tail) tail = nullptr;
+     if (pinned == nullptr) return eviction_victim(stamps, n, cap, tail);
+     if (cap < 2 || n < 2) return 0;
+     size_t newest = 0;
+diff --git a/include/strata/spec/draft_policy.hpp b/include/strata/spec/draft_policy.hpp
+index 09c06d74d24f37195e6181a952be2b062e98a001..ac6bea8afae5b08f45c5228a8bd798fad9cf034c 100644
+--- a/include/strata/spec/draft_policy.hpp
++++ b/include/strata/spec/draft_policy.hpp
+@@ -59,6 +59,7 @@ private:
+     std::array<double, kBuckets> cok_{}, cbad_{};          // chained lookup drafts, the same (reached rounds only)
+     double rounds_ = 0;                                    // rounds observed so far
+     std::array<double, kMaxT + 1> last_{};                 // the round at which each size was last measured
++    double reprobe_rounds_ = 0; // opt-in: refresh stale intermediate lookup sizes after expert placement changes
+ };
+ 
+ }  // namespace strata::spec
+diff --git a/serve/server.py b/serve/server.py
+index 632d3c042ebbe6364410fa046038a588f07acaf1..27d083d0e9f6ab0be5bfb85c4679db7a54e95ccb 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -1404,6 +1404,9 @@ class StrataEngine:
+         # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
+         tune = sampling.get("strata_tune")
+         if isinstance(tune, dict):
++            tasks = tune.get("pool_tasks")
++            if isinstance(tasks, int) and not isinstance(tasks, bool) and 0 <= tasks <= 4096:
++                keys += f" pool_tasks={tasks}"
+             for k in ("pcie_frac", "spec_min_p"):
+                 v = tune.get(k)
+                 if isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= float(v) <= 1.0:
+diff --git a/src/core/expert_source.cpp b/src/core/expert_source.cpp
+index b8ad8fb42129e506365978f556cdcf6c67ffcfc9..a19c15a29b2c841b117243ca7df7220805e4245d 100644
+--- a/src/core/expert_source.cpp
++++ b/src/core/expert_source.cpp
+@@ -1,5 +1,6 @@
+ // src/core/expert_source.cpp - the adapter.  See the header for the three clauses of the contract.
+ #include "strata/core/expert_source.hpp"
++#include "strata/core/async_job.hpp"
+ #include "strata/core/foresight_swap.hpp"
+ #include "strata/core/on_device.hpp"
+ #include "strata/platform/aux_cpus.hpp"
+@@ -2697,7 +2698,17 @@ bool FileExpertSource::read_direct(const Fill* fills, size_t n) const {
+     // maps the GGUF shards for the token embedding and the PLE table): measured on a PCIe 5 drive, 512 KiB reads at
+     // queue depth 48 make 10.4 GB/s on a file nobody maps and 3.4 GB/s on a mapped one, 8 MiB reads 8.6 GB/s.  So
+     // windows less than kGap apart (the same role of nearby experts) are merged into requests of up to kMerge bytes.
+-    constexpr uint64_t kSector = 4096, kGap = 1ull << 20, kMerge = 32ull << 20;
++    constexpr uint64_t kSector = 4096, kMerge = 32ull << 20;
++    // SSD-specific tuning: merging across a gap trades extra bytes for fewer NTFS reads.
++    // Preserve the measured upstream default; zero merges only touching windows.
++    static const uint64_t kGap = []() -> uint64_t {
++        const char* v = std::getenv("STRATA_IO_MERGE_GAP_KIB");
++        if (v == nullptr) return 1ull << 20;
++        char* end = nullptr;
++        const long long kib = std::strtoll(v, &end, 10);
++        return end != v && *end == '\0' && kib >= 0 && kib <= 65536
++                   ? (uint64_t) kib * 1024 : 1ull << 20;
++    }();
+     struct Window { int file; uint64_t a0, size, skip, n, at; uint8_t* dst; size_t req; uint64_t in_req; };
+     struct Req { HANDLE h; uint64_t a0, size, pos; };
+     // this thread's aligned buffer and events, kept for its next batch
+@@ -4526,6 +4537,49 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
+     return resident_blob(index);   // through the rotation's ownership table when STRATA_EXCHANGE_ROTATE is on
+ }
+ 
++int64_t FileExpertSource::rebalance_ram(const std::vector<int32_t>& gpu, const std::vector<float>& heat, int limit) {
++    if (limit<=0 || !complement_ready_ || !complement_host_ || exchange_storage_.active() || !staged_.empty() ||
++        gpu.size()!=size_t(blobs_) || heat.size()!=size_t(blobs_) || complement_offsets_.size()!=size_t(blobs_)) return 0;
++    if (std::any_of(override_.begin(),override_.end(),[](const uint8_t* p){return p!=nullptr;}))return 0;
++    struct Move {float gain;int64_t layer;size_t cold,hot;};
++    std::vector<Move> moves;
++    for(int64_t layer=0;layer<n_layers_;++layer){
++        std::vector<size_t> cold,hot;
++        for(int64_t e=0;e<n_expert_;++e){
++            const size_t i=size_t(layer*n_expert_+e);
++            if(gpu[i]>=0 || !(heat[i]>=0))continue;
++            if(complement_offsets_[i]!=kNoComplement)cold.push_back(i);
++            else if(heat[i]>=4)hot.push_back(i);
++        }
++        std::sort(cold.begin(),cold.end(),[&](size_t a,size_t b){return heat[a]<heat[b] || (heat[a]==heat[b] && a<b);});
++        std::sort(hot.begin(),hot.end(),[&](size_t a,size_t b){return heat[a]>heat[b] || (heat[a]==heat[b] && a<b);});
++        for(size_t j=0;j<std::min(cold.size(),hot.size());++j){
++            if(heat[hot[j]]<=2*heat[cold[j]]+4)break;
++            moves.push_back({heat[hot[j]]-heat[cold[j]],layer,cold[j],hot[j]});
++        }
++    }
++    std::sort(moves.begin(),moves.end(),[](const Move& a,const Move& b){return a.gain>b.gain || (a.gain==b.gain && a.hot<b.hot);});
++    std::vector<uint8_t> buffer;int64_t applied=0;
++    for(const Move& m:moves){
++        if(applied>=limit)break;
++        const uint64_t bytes=layer_blob_bytes_[size_t(m.layer)],at=complement_offsets_[m.cold];
++        if(at==kNoComplement || at>complement_bytes_ || bytes>complement_bytes_-at || complement_offsets_[m.hot]!=kNoComplement)continue;
++        buffer.resize(size_t(bytes));
++        if(!copy_from_files(m.layer,int64_t(m.hot)%n_expert_,buffer.data()))continue;
++        // All source bytes were read successfully before touching the existing slot.
++        // A Foresight slot may copy (or have copied) out of the cold expert's place: drop it before the place is
++        // rewritten, as replace_resident does, so the cold expert is never served the hot expert's bytes.
++        ForesightSwap* fs=fs_swap_.load(std::memory_order_acquire);
++        const int32_t cold_expert=int32_t(int64_t(m.cold)%n_expert_);
++        if(fs!=nullptr)fs->hold(m.layer,cold_expert);
++        std::memcpy((uint8_t*)complement_host_+size_t(at),buffer.data(),size_t(bytes));
++        if(!detail::exchange_cache_complement(complement_offsets_,m.cold,m.hot))std::abort();
++        if(fs!=nullptr)fs->unhold(m.layer,cold_expert);
++        ++applied;
++    }
++    return applied;
++}
++
+ const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
+     if (io_pf_ && role_ptr_.empty() && direct_.empty()) {
+         if (complement_ready_ && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
+@@ -4824,6 +4878,9 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+     if (!d.usage.empty())
+         for (int64_t i = 0; i < n_tok * k; ++i)
+             if (ids[i] >= 0 && ids[i] < d.n_expert) d.usage[(size_t) d.layers * (size_t) d.n_expert + (size_t) ids[i]] += 1.0f;
++    if(d.ram_heat && d.ram_heat->size()==d.usage.size())
++        for(int64_t i=0;i<n_tok*k;++i)if(ids[i]>=0 && ids[i]<d.n_expert)
++            (*d.ram_heat)[size_t(d.layers)*size_t(d.n_expert)+size_t(ids[i])]+=1.0f;
+     // ---- plan v0.3 P6: the GPU's share, decided and published FIRST so the GPU starts while the CPU works.
+     // Distinct experts in routing order; resident ones and the last pcie_num/256 of the missed ones go to the GPU.
+     const int64_t n = n_tok * k;
+@@ -4855,8 +4912,31 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+         // only at rank >= R (the smallest weights of the top-10) is neither copied nor computed; its contribution is
+         // zero, without renormalisation (the others keep the weight the router gave them).  Less PCIe and CPU work.
+         const int tail_rank = tail_skip_rank();
++        // STRATA_FILE_SKIP=R (opt-in, changes the output): like the tail skip, but only for an expert that is neither in
++        // VRAM nor in the RAM copy - one the layer would wait for the SSD to read - routed by every token of the window
++        // at rank >= R.  The RAM tier's experts stay computed (CPU work, no wait).  Both may be set: either skips.
++        static const int file_rank = [] { const char* v = std::getenv("STRATA_FILE_SKIP"); const int r = v ? std::atoi(v) : 0; return r > 0 && r < 10 ? r : 0; }();
++        FileExpertSource* fsrc = file_rank > 0 ? dynamic_cast<FileExpertSource*>(d.src) : nullptr;
+         bool skip_d[kMaxWindowEntries];
+         for (int q = 0; q < nd; ++q) skip_d[q] = false;
++        if (fsrc != nullptr && d.peer == nullptr && d.remote_count == 0) {
++            int minr[kMaxWindowEntries];
++            for (int q = 0; q < nd; ++q) minr[q] = 99;
++            for (int64_t i = 0; i < n; ++i) {
++                int q = 0;
++                while (q < nd && distinct[q] != first_of[i]) ++q;
++                if (q < nd) minr[q] = std::min(minr[q], (int) (i % k));
++            }
++            for (int q = 0; q < nd; ++q) {
++                const int32_t e = ids[distinct[q]];
++                if (e < 0 || e >= d.n_expert || minr[q] < file_rank) continue;
++                if (d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] >= 0) continue;   // VRAM
++                if (fsrc->resident_blob(d.layers, e) != nullptr) continue;                             // RAM
++                skip_d[q] = true;
++                --nmiss;
++                ++d.tail_experts;
++            }
++        }
+         if (tail_rank > 0 && d.peer == nullptr && d.remote_count == 0) {
+             int minr[kMaxWindowEntries];
+             for (int q = 0; q < nd; ++q) minr[q] = 99;
+@@ -4867,7 +4947,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
+             }
+             for (int q = 0; q < nd; ++q) {
+                 const int32_t e = ids[distinct[q]];
+-                if (e < 0 || e >= d.n_expert || minr[q] < tail_rank) continue;
++                if (skip_d[q] || e < 0 || e >= d.n_expert || minr[q] < tail_rank) continue;
+                 if (d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] >= 0) continue;   // resident
+                 skip_d[q] = true;
+                 --nmiss;
+diff --git a/src/kernels/cpu/pool.cpp b/src/kernels/cpu/pool.cpp
+index cdcc8d79249e5af774112383942228453331e7fe..03d9e02ec7f8e05b4c085eb0dc0c60cd6bc67fef 100644
+--- a/src/kernels/cpu/pool.cpp
++++ b/src/kernels/cpu/pool.cpp
+@@ -1313,6 +1313,11 @@ void ExpertPool::run_split(ExpertJob* jobs, int n) {
+     ms_drain_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+ }
+ 
++void ExpertPool::set_phase_tasks(int tasks) {
++    if (tasks < 0 || tasks > kMaxTasks) throw std::invalid_argument("pool task target out of range");
++    tasks_ = tasks;
++}
++
+ int ExpertPool::phase_tasks(int64_t rows) const {
+     return tasks_ == 0 ? 3 * (n_ + (host_works_ ? 1 : 0)) : (int) (std::min)(rows, (int64_t) tasks_);
+ }
+diff --git a/src/kernels/cpu/pool_tasks_test.cpp b/src/kernels/cpu/pool_tasks_test.cpp
+index aa272880df1f92daaa7284e1ac6b636a474249c4..ac8b462188232f5b432c0e32c92e1aa02e0fed56 100644
+--- a/src/kernels/cpu/pool_tasks_test.cpp
++++ b/src/kernels/cpu/pool_tasks_test.cpp
+@@ -102,8 +102,13 @@ int main(int argc, char** argv) {
+         for (float v : ref) if (!std::isfinite(v)) return 1;
+         for (bool host : {false, true}) for (int workers : {1, 3})
+             for (int tasks : {0, 1, 41, 128, 192, 256, cpu::ExpertPool::kMaxTasks}) {
+-                cpu::ExpertPool pool(workers, false, host, cpu::PoolAffinity::All, tasks);
++                cpu::ExpertPool pool(workers, false, host, cpu::PoolAffinity::All, 0);
++                for (int invalid : {-1, cpu::ExpertPool::kMaxTasks + 1}) {
++                    try { pool.set_phase_tasks(invalid); return 1; }
++                    catch (const std::invalid_argument&) {}
++                }
+                 for (int repeat = 0; repeat < 2; ++repeat) {
++                    pool.set_phase_tasks(repeat ? 0 : tasks);
+                     std::fill(out.begin(), out.end(), 0.0f);
+                     for (const auto& job : jobs) for (int t = 0; t < job.nt; ++t)
+                         std::fill(job.out[t], job.out[t] + cpu::H, std::numeric_limits<float>::quiet_NaN());
+diff --git a/src/kernels/cpu/tq_avx2.cpp b/src/kernels/cpu/tq_avx2.cpp
+index 00918edf6f2bdd1a37db8073df4af7694ee646a2..19f3d97d70c005a4a0eca3e0c7b27c403a99f66c 100644
+--- a/src/kernels/cpu/tq_avx2.cpp
++++ b/src/kernels/cpu/tq_avx2.cpp
+@@ -21,7 +21,13 @@ namespace {
+ 
+ // four state-table rows (8 bytes each) into one YMM: a load and three broadcast loads blended in.  Broadcast loads
+ // and VPBLENDD avoid the shuffle port that VPINSRQ / VINSERTI128 need (the two measure the same on Zen 5).
++template <int KB>
+ inline __m256i rows4(const long long* tab, uint32_t s0, uint32_t s1, uint32_t s2, uint32_t s3) {
++    // TQ2_T: constructing the two halves reduced the measured cold single-token
++    // expert time from 593 to 528 us; lane values are identical.
++    if constexpr (KB == 8)
++        return _mm256_set_m128i(_mm_set_epi64x(tab[s3], tab[s2]),
++                               _mm_set_epi64x(tab[s1], tab[s0]));
+     __m256i v = _mm256_castsi128_si256(_mm_loadl_epi64((const __m128i*) (tab + s0)));
+     v = _mm256_blend_epi32(v, _mm256_set1_epi64x(tab[s1]), 0x0C);
+     v = _mm256_blend_epi32(v, _mm256_set1_epi64x(tab[s2]), 0x30);
+@@ -47,7 +53,7 @@ void rows_t(const uint8_t* w, size_t row_bytes, int n, const TqAct* const* a, in
+ #pragma GCC unroll 8
+ #endif
+             for (int m = 0; m < 8; ++m)
+-                wv[m] = rows4(tab, tq_state<KB>(qs, wr, 4 * m), tq_state<KB>(qs, wr, 4 * m + 1),
++                wv[m] = rows4<KB>(tab, tq_state<KB>(qs, wr, 4 * m), tq_state<KB>(qs, wr, 4 * m + 1),
+                               tq_state<KB>(qs, wr, 4 * m + 2), tq_state<KB>(qs, wr, 4 * m + 3));
+             const __m128 dx = _mm_set1_ps(tq_half_to_float(tq_ld16(blk)));
+             for (int t = 0; t < nt; ++t) {
+diff --git a/src/prefill/prefill.cpp b/src/prefill/prefill.cpp
+index c9b4535407a60fd57d7db774c9ecdb529ef5911c..3c4c1f4f305d64f6be185638571009cb01e4f3b5 100644
+--- a/src/prefill/prefill.cpp
++++ b/src/prefill/prefill.cpp
+@@ -2122,7 +2122,8 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
+     }
+     if (pp->sums) {
+         const char* v = std::getenv("STRATA_PF_PEER_F16");
+-        pp->f16 = (v == nullptr || std::atoi(v) != 0) && N % 8 == 0;
++        // APR uses the rotated FP32 input for peer transfer; mixed_h is unrotated.
++        pp->f16 = (v == nullptr || std::atoi(v) != 0) && N % 8 == 0 && !strata::kernels::cpu::hadamard_spec().any();
+         if (pp->f16) pp->sum16 = (uint16_t*) take((size_t) m.T_max * N * 2);
+         const char* gv = std::getenv("STRATA_PF_PEER_GATHER");
+         pp->gather = gv == nullptr || std::atoi(gv) != 0;
+@@ -4084,7 +4085,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+                                 xs = P.x_stream;
+                             }
+                             if (!P.p2p && P.f16) cudaMemcpyAsync(P.host_x16, m.mixed_h, (size_t) T * N * 2, cudaMemcpyDeviceToHost, xs);
+-                            else if (!P.p2p) cudaMemcpyAsync(P.host_x, m.mixed, (size_t) T * N * 4, cudaMemcpyDeviceToHost, xs);
++                            else if (!P.p2p) cudaMemcpyAsync(P.host_x, xsrc, (size_t) T * N * 4, cudaMemcpyDeviceToHost, xs);
+                             if (P.sums) {   // the routing weights, and each peer row's routed pair (t * K + k)
+                                 cudaMemcpyAsync(P.host_w, m.w, (size_t) T * K * 4, cudaMemcpyDeviceToHost, xs);
+                                 for (int64_t i = 0; i < T * K; ++i)
+@@ -4098,7 +4099,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+                             cudaStreamWaitEvent(ps, P.ev_in, 0);
+                             if (P.out_pending) { cudaStreamWaitEvent(ps, P.ev_done, 0); P.out_pending = false; }
+                             pe.mark(kPeMoeIn, ps);
+-                            if (P.p2p) cudaMemcpyPeerAsync(P.mixed, P.dev, m.mixed, prevd, (size_t) T * N * 4, ps);
++                            if (P.p2p) cudaMemcpyPeerAsync(P.mixed, P.dev, xsrc, prevd, (size_t) T * N * 4, ps);
+                             else if (P.f16) f16_to_f32_wide(P.mixed, P.host_x16, T * N, ps);
+                             else copy_f32_wide(P.mixed, P.host_x, T * N, ps);
+                             P.back_at = rows_local;
+diff --git a/src/program/conv_cache_test.cpp b/src/program/conv_cache_test.cpp
+index 40da79573e66a065a8d246367f798ab1f7d5da11..32c6f78c4c988b0bf793506d1a5f20df68ba1ae8 100644
+--- a/src/program/conv_cache_test.cpp
++++ b/src/program/conv_cache_test.cpp
+@@ -132,6 +132,19 @@ int main() {
+         check(eviction_victim(s4.data(), s4.size(), 4, nullptr, all) == 2, "everything pinned: the oldest pin leaves, never the root");
+         check(eviction_victim(s4.data(), s4.size(), 1, nullptr, all) == 0, "a one-slot budget keeps no pin: the oldest leaves");
+     }
++    {   // A completed long prompt: root, old periodic checkpoints, near-tail, final turn.
++        const uint64_t st[5] = {1, 2, 3, 4, 5};
++        const bool tails[5] = {false, false, false, true, false};
++        const bool pins[5] = {false, true, false, false, false};
++        check(eviction_victim(st, 5, 4, tails, nullptr, true) == 1,
++              "opt-in tail retention evicts an older periodic checkpoint at capacity");
++        check(eviction_victim(st, 5, 4, tails, pins, true) == 2,
++              "tail retention respects explicit prefix pins and the four-slot budget");
++        check(eviction_victim(st, 5, 4, tails, nullptr) == 3,
++              "default tail eviction behavior is unchanged");
++        check(eviction_victim(st, 5, 1, tails, pins, true) == 0,
++              "tail retention keeps the one-slot fallback unchanged");
++    }
+     std::printf(g_fail ? "FAIL\n" : "PASS\n");
+     return g_fail ? 1 : 0;
+ }
+diff --git a/src/program/generate.cpp b/src/program/generate.cpp
+index dbc0cf836c070f4110afcfecd30c2683aa0aa8d2..aa126876b9d0473cd6a3e93fb6884ddbabc9e5d8 100644
+--- a/src/program/generate.cpp
++++ b/src/program/generate.cpp
+@@ -9689,7 +9689,7 @@ int main(int argc, char** argv) {
+                     stamps.push_back(k.used);
+                     is_tail.push_back(tail_ckpt_len >= 0 && (int64_t) k.ids.size() == tail_ckpt_len);
+                 }
+-                // the tail checkpoint serves only a branch of the last request: it leaves before a periodic one
++                // Opt-in prompt tails use normal LRU so the completed turn retains its branching prefix.
+                 std::unique_ptr<bool[]> tail_flags(new bool[is_tail.size()]);
+                 for (size_t i = 0; i < is_tail.size(); ++i) tail_flags[i] = is_tail[i] != 0;
+                 // the pin=N prefix is never the victim (flags only when one is pinned: nothing changes without)
+@@ -9702,11 +9702,14 @@ int main(int argc, char** argv) {
+                     }
+                 std::vector<int64_t> lens;
+                 for (const ConvCheckpoint& k : checks) lens.push_back((int64_t) k.ids.size());
++                // --prompt-cache-tail: the near-tail checkpoint is retained, so it is evicted by ordinary LRU instead
++                const bool* tail_evict = o.prompt_cache_tail ? nullptr : tail_flags.get();
+                 const size_t victim = o.prompt_cache_spread
+                     ? strata::program::conv_cache::spread_victim(lens.data(), stamps.data(), stamps.size(),
+-                                                                 o.prompt_cache, tail_flags.get(), pin_flags.get())
++                                                                 o.prompt_cache, tail_evict, pin_flags.get())
+                     : strata::program::conv_cache::eviction_victim(stamps.data(), stamps.size(), o.prompt_cache,
+-                                                                   tail_flags.get(), pin_flags.get());
++                                                                   tail_flags.get(), pin_flags.get(),
++                                                                   o.prompt_cache_tail);
+                 ckpt_pool.give(std::move(checks[victim]));   // (STRATA_CKPT_POOL; else nothing)
+                 checks.erase(checks.begin() + (std::ptrdiff_t) victim);
+             }
+@@ -12161,6 +12164,7 @@ int main(int argc, char** argv) {
+             // the missed experts and the draft-probability floor, for this request only
+             double req_pcie_frac = o.pcie_frac, req_spec_min_p = o.spec_min_p;
+             double req_pipe = -1.0;   // --prefill-pipe for this request (setup's calibration of a layer split)
++            int req_pool_tasks = o.pool_tasks;
+             int req_aux_cpus = -1;   // aux_cpus=0|1: --aux-cpus for this request (-1 = the start-up value)
+             // #2228: img_keys=<hex>,<hex>,... (GENI): each picture's key from the server (its normalized bytes' hash),
+             // in prompt order.  With them the conversation cache matches a picture by its key and grid, not by its
+@@ -12193,6 +12197,7 @@ int main(int argc, char** argv) {
+                     else if (key == "penalty_present") req_penalty_present = fv;
+                     else if (key == "seed") req_seed = std::strtoull(tok.c_str() + eq + 1, nullptr, 10);
+                     else if (key == "pcie_frac") { req_pcie_frac = std::clamp((double) fv, 0.0, 1.0); req_pcie_set = true; }
++                    else if (key == "pool_tasks") req_pool_tasks = std::clamp(std::atoi(tok.c_str() + eq + 1), 0, strata::kernels::cpu::ExpertPool::kMaxTasks);
+                     else if (key == "spec_min_p") req_spec_min_p = std::clamp((double) fv, 0.0, 1.0);
+                     else if (key == "pipe") req_pipe = std::max(0.0, (double) fv);
+                     else if (key == "aux_cpus") req_aux_cpus = std::atoi(tok.c_str() + eq + 1) != 0 ? 1 : 0;
+@@ -13808,6 +13813,7 @@ int main(int argc, char** argv) {
+             }
+             ver.pause_pcie_balance(req_pcie_set);   // the measured costs keep across requests
+             drive.d.pcie_num = std::max(0, std::min(256, (int) (req_pcie_frac * 256.0 + 0.5)));
++            if (o.batch == 0 && n_stages == 1) pool.set_phase_tasks(req_pool_tasks);
+             // a layer split: CUDA0's share as asked; a later GPU keeps its own (its link) unless the request sets one
+             for (int st = 0; st < split_drive.n; ++st)
+                 split_drive.pcie_num[st] = (st == 0 || split_same || req_pcie_frac != o.pcie_frac)
+@@ -13879,7 +13885,18 @@ int main(int argc, char** argv) {
+                     std::fprintf(stderr, "strata serve: pin=%lld: the cache has no checkpoint there to pin (it resumed from "
+                                  "%lld)\n", (long long) req_pin, (long long) read_from);
+             }
++            // A large final prefill chunk can leave the nearest reusable prefix several
++            // thousand tokens behind. With explicit tail caching, bound that reread for
++            // text requests by splitting only the final 512-token part. Image requests
++            // retain their existing geometry and explicit image-prefix checkpoints.
++            const int64_t tail_at = o.prompt_cache_tail && !multi_gpu && req_ckpt && req_imgs.empty() &&
++                turn_at - read_from > 512 + std::max<int64_t>(1, o.short_read)
++                ? turn_at - 512 : -1;
+             std::vector<int64_t> cuts = {reread_to, root_at, message_at, turn_at, n - 1};
++            if (tail_at >= 0) {
++                cuts.push_back(tail_at);
++                std::sort(cuts.begin(), cuts.end());
++            }
+             if (pin_at >= 0) {
+                 cuts.push_back(pin_at);
+                 std::sort(cuts.begin(), cuts.end());   // the skipped -1s first, n - 1 still last
+@@ -13966,8 +13983,8 @@ int main(int argc, char** argv) {
+                     break;
+                 }
+                 at = to;
+-                if ((to == turn_at || to == root_at || to == message_at || to == pin_at) &&
+-                    !checkpoint_at(to, nullptr, to == message_at && to != turn_at && to != root_at && to != pin_at)) {   // the tail kind leaves first
++                if ((to == turn_at || to == root_at || to == message_at || to == tail_at || to == pin_at) &&
++                    !checkpoint_at(to, nullptr, (to == message_at || to == tail_at) && to != turn_at && to != root_at && to != pin_at)) {   // explicit tails use the retention policy above
+                     std::printf("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
+                     return 1;
+                 }
+@@ -14056,6 +14073,25 @@ int main(int argc, char** argv) {
+             double dt_adapt_wait = 0, dt_adapt_join = 0;   // the tier's wait before a window / join after the draft (ms, summed)
+             const int64_t dt_sw0 = ajob ? a_swapped : adapt_nswaps;
+             int64_t dec_windows = 0, dec_T = 0;
++            static const int ram_rebalance_limit=[]{
++                const char* v=std::getenv("STRATA_RAM_REBALANCE");return v?std::clamp(std::atoi(v),0,512):0;
++            }();
++            const bool ram_rebalance=ram_rebalance_limit && !multi_gpu && !o.adapt_async && o.batch==0 &&
++                o.pipeline_windows<=1 && !aov && src.complement_ready() && !src.exchange_rotation();
++            std::vector<float> ram_usage0(ram_rebalance?drive.d.usage.size():0,0.0f);
++            drive.d.ram_heat=ram_rebalance?&ram_usage0:nullptr;
++            auto maintain_ram=[&]() -> bool {
++                if(!ram_rebalance)return true;
++                if(!ver.wait_commit(err))return false;
++                apply_pending(true);
++                if(cudaDeviceSynchronize()!=cudaSuccess){err="RAM rebalance synchronization";return false;}
++                const auto rt=Clock::now();
++                const int64_t swapped=src.rebalance_ram(host_res,ram_usage0,ram_rebalance_limit);
++                std::fill(ram_usage0.begin(),ram_usage0.end(),0.0f);
++                std::fprintf(stderr,"strata RAM rebalance: %lld hot file experts promoted in %.1f ms; RAM capacity unchanged\n",
++                    (long long)swapped,std::chrono::duration<double,std::milli>(Clock::now()-rt).count());
++                return true;
++            };
+             const int64_t decode_hits0 = drive.d.cache_hits;
+             // CS-T: the RAM and file tiers of this request (the mmap source; 0 with the arena)
+             const int64_t ram0 = src.ram_reads(), files0 = src.file_reads();
+@@ -15211,6 +15247,10 @@ int main(int argc, char** argv) {
+             //      chunk=<tokens> experts_streamed=<blobs>   (key=value, last: the first chunk of the request's longest
+             //      batched segment, 0 when it read none; the expert blobs its prompt read copied host -> device on
+             //      every stage - not the CPU share's, the stage helper's or a --peer-device peer's)
++            drive.d.ram_heat=nullptr;
++            if(ram_rebalance && !cancelled && !nf_hit && !maintain_ram()){
++                std::printf("ERR %s\n",err.c_str());return 1;
++            }
+             char chain_txt[128] = "";
+             if (o.lookup_chain > 0)
+                 std::snprintf(chain_txt, sizeof(chain_txt), " %lld %lld %lld %lld %lld", (long long) chain_ok,
+diff --git a/src/spec/draft_policy.cpp b/src/spec/draft_policy.cpp
+index 8d422789b18d9362793cd705b154e2fc58842150..ca3d16ddcb4ef655744b572845c1d88bd80caa62 100644
+--- a/src/spec/draft_policy.cpp
++++ b/src/spec/draft_policy.cpp
+@@ -2,6 +2,7 @@
+ #include "strata/spec/draft_policy.hpp"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ 
+ namespace strata::spec {
+ namespace {
+@@ -25,7 +26,15 @@ constexpr double kStaleRounds = 300.0;
+ }  // namespace
+ 
+ DraftPolicy::DraftPolicy(int max_t, double margin)
+-    : max_t_(std::clamp(max_t, 1, kMaxT)), margin_(margin) {}
++    : max_t_(std::clamp(max_t, 1, kMaxT)), margin_(margin) {
++    // Disabled by default. RAM-expert promotion changes window costs after startup;
++    // the default probes only the full proposal, so a cold middle-size price may persist.
++    if (const char* e = std::getenv("STRATA_LOOKUP_REPROBE_ROUNDS")) {
++        char* end = nullptr;
++        const long n = std::strtol(e, &end, 10);
++        if (end != e && *end == '\0' && n >= 16 && n <= 300) reprobe_rounds_ = (double) n;
++    }
++}
+ 
+ int DraftPolicy::bucket(int match) {
+     return match < 6 ? 0 : match < 12 ? 1 : match < 24 ? 2 : 3;
+@@ -72,6 +81,15 @@ DraftPolicy::Pick DraftPolicy::choose(int t_mtp, int lookup_k, int match) const
+         if (r > best) { best = r; best_t = k + 1; }
+     }
+     const int t_full = std::min(lookup_k, max_t_ - 1) + 1;
++    if (reprobe_rounds_ > 0 && q >= 0.85) {
++        for (int t = 2; t <= t_full; ++t) {
++            // The nominal best width is not measured if it loses to target-only decoding.
++            if (t == best_t && best > base * (1.0 + margin_)) continue;
++            if (cost_n_[t] < kProbes || rounds_ - last_[t] > reprobe_rounds_) {
++                p.lookup = true; p.t = t; return p;
++            }
++        }
++    }
+     if (best_t > 0 && best > base * (1.0 + margin_)) {
+         p.lookup = true;
+         p.t = best_t;
+@@ -91,7 +109,8 @@ DraftPolicy::Pick DraftPolicy::choose(int t_mtp, int lookup_k, int match) const
+ void DraftPolicy::observe(bool lookup, int t, int accepted, int match, double round_ms) {
+     t = std::clamp(t, 1, kMaxT);
+     if (round_ms > 0) {
+-        cost_[t] = cost_n_[t] > 0 ? (1.0 - kCostAlpha) * cost_[t] + kCostAlpha * round_ms : round_ms;
++        const bool refresh = reprobe_rounds_ > 0 && rounds_ - last_[t] > reprobe_rounds_;
++        cost_[t] = cost_n_[t] > 0 && !refresh ? (1.0 - kCostAlpha) * cost_[t] + kCostAlpha * round_ms : round_ms;
+         cost_n_[t] += 1.0;
+         last_[t] = rounds_;
+     }
+@@ -142,7 +161,8 @@ int DraftPolicy::chain(int t_mtp, double p_mtp, int k_avail, int match) const {
+ void DraftPolicy::observe_chain(int t_mtp, int k, int accepted, int match, double round_ms) {
+     const int t = std::clamp(t_mtp + k, 1, kMaxT);
+     if (round_ms > 0) {
+-        cost_[t] = cost_n_[t] > 0 ? (1.0 - kCostAlpha) * cost_[t] + kCostAlpha * round_ms : round_ms;
++        const bool refresh = reprobe_rounds_ > 0 && rounds_ - last_[t] > reprobe_rounds_;
++        cost_[t] = cost_n_[t] > 0 && !refresh ? (1.0 - kCostAlpha) * cost_[t] + kCostAlpha * round_ms : round_ms;
+         cost_n_[t] += 1.0;
+         last_[t] = rounds_;
+     }
+diff --git a/tests/core/async_job_test.cpp b/tests/core/async_job_test.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b19cd7d2b1df0e79efe8349f3d593c934aec9ee5
+--- /dev/null
++++ b/tests/core/async_job_test.cpp
+@@ -0,0 +1,26 @@
++#include "strata/core/async_job.hpp"
++#include <atomic>
++#include <cstdio>
++#include <future>
++#include <stdexcept>
++int main() {
++    strata::core::AsyncJob worker;
++    std::atomic<int> counter{0};
++    std::promise<void> go; auto gate = go.get_future();
++    worker.start([&] { gate.wait(); ++counter; });
++    bool refused = false;
++    try { worker.start([] {}); } catch (const std::logic_error&) { refused = true; }
++    const bool correctly_blocked = refused && counter == 0;
++    go.set_value(); worker.wait();
++    if (!correctly_blocked) return 1;
++    if (counter != 1) return 2;
++    worker.start([] { throw std::runtime_error("read failed"); });
++    bool failed = false;
++    try { worker.wait(); } catch (const std::runtime_error&) { failed = true; }
++    if (!failed) return 3;
++    for (int i = 0; i < 1000; ++i) { worker.start([&] { ++counter; }); worker.wait(); }
++    if (counter != 1001) return 4;
++    { worker.start([&] { ++counter; }); strata::core::AsyncJob::Await await{&worker}; }
++    if (counter != 1002) return 5;
++    std::puts("async_job_test: PASS"); return 0;
++}
+diff --git a/tests/core/file_expert_source_test.cpp b/tests/core/file_expert_source_test.cpp
+index e162664d1ff3aae45e6c878ead2f27ea55cb82ad..fc485ffddc960d43828dbe3f90242980bfb210b5 100644
+--- a/tests/core/file_expert_source_test.cpp
++++ b/tests/core/file_expert_source_test.cpp
+@@ -982,10 +982,97 @@ void test_replace_resident(bool pin) {
+     std::cout << "replace_resident: pinned=" << pin << " exact_bytes=PASS\n";
+ }
+ 
++void test_ram_rebalance() {
++    using namespace strata::core;using namespace strata::kernels::cpu;
++#if defined(_WIN32)
++    _putenv_s("STRATA_EXCHANGE_ROTATE","0");
++#else
++    setenv("STRATA_EXCHANGE_ROTATE","0",1);
++#endif
++    TempDirectory dir;std::string err;
++    require(expert_layout_load(dir.path.string(),1,5,err),err);
++    const size_t bytes=size_t(BLOB);
++    std::vector<std::vector<uint8_t>> truth(5,std::vector<uint8_t>(bytes));
++    std::ofstream out(dir.path/"experts.bin",std::ios::binary);
++    for(size_t e=0;e<5;++e){
++        for(size_t i=0;i<bytes;++i)truth[e][i]=uint8_t((i*131+e*37)^(i>>8));
++        out.write((const char*)truth[e].data(),std::streamsize(bytes));
++    }
++    out.close();FileExpertSource src;ExpertCache cache;
++    require(src.open(dir.path.string(),1,5,err),err);
++    require(cache.open(2,1,5,BLOB,err),err);
++    for(int e:{2,3}){const int slot=cache.admit(0,e);require(slot>=0 && cache.fill_slot_blocking(slot,truth[e].data(),err),err);}
++    std::vector<std::pair<int32_t,int32_t>> rank;
++    for(int e:{0,1,4,2,3})rank.push_back({0,e});
++    require(src.pin_cache_complement(cache,err,false,{},-1,0,2*bytes,&rank),err);
++    const uint64_t capacity=src.resident_bytes();
++    std::vector<int32_t> gpu{-1,-1,0,1,-1};std::vector<float> heat{0,1,1000,1000,30};
++    require(src.rebalance_ram(gpu,heat,1)==1,"one hot file blob must replace one cold RAM blob");
++    require(src.resident_bytes()==capacity,"RAM capacity changed");
++    require(!src.has_resident(0,0) && src.has_resident(0,4),"replacement ownership");
++    require(std::memcmp(src.resident_blob(0,4),truth[4].data(),bytes)==0,"promoted bytes corrupted");
++    require(std::memcmp(src.blob(0,0),truth[0].data(),bytes)==0,"evicted file fallback corrupted");
++    require(!src.has_resident(0,2) && !src.has_resident(0,3),"GPU ownership must be untouched");
++    require(src.rebalance_ram(gpu,heat,1)==0,"already hot cache should not churn");
++    heat={50,0,1000,1000,0};
++    require(src.rebalance_ram(gpu,heat,1)==1,"reverse workload promotion");
++    require(std::memcmp(src.resident_blob(0,0),truth[0].data(),bytes)==0,"reverse bytes corrupted");
++    require(src.rebalance_ram({},heat,4)==0,"invalid geometry must be refused");
++}
++
++// STRATA_RAM_REBALANCE beside the Foresight swap space: a slot copied from a cold expert's RAM place must not be served
++// once rebalance_ram has given that place to a hot expert (the slot's source bytes now belong to another expert).
++void test_foresight_rebalance() {
++    using namespace strata::core;using namespace strata::kernels::cpu;
++#if defined(_WIN32)
++    _putenv_s("STRATA_EXCHANGE_ROTATE","0");
++#else
++    setenv("STRATA_EXCHANGE_ROTATE","0",1);
++#endif
++    TempDirectory dir;std::string err;
++    require(expert_layout_load(dir.path.string(),1,5,err),err);
++    const size_t bytes=size_t(BLOB);
++    std::vector<std::vector<uint8_t>> truth(5,std::vector<uint8_t>(bytes));
++    {
++        std::ofstream out(dir.path/"experts.bin",std::ios::binary);
++        for(size_t e=0;e<5;++e){
++            for(size_t i=0;i<bytes;++i)truth[e][i]=uint8_t((i*131+e*37)^(i>>8));
++            out.write((const char*)truth[e].data(),std::streamsize(bytes));
++        }
++        require((bool)out,"fixture write failed");
++    }
++    FileExpertSource src;ExpertCache cache;
++    require(src.open(dir.path.string(),1,5,err),err);
++    require(cache.open(2,1,5,BLOB,err),err);
++    for(int e:{2,3}){const int slot=cache.admit(0,e);require(slot>=0 && cache.fill_slot_blocking(slot,truth[e].data(),err),err);}
++    std::vector<std::pair<int32_t,int32_t>> rank;
++    for(int e:{0,1,4,2,3})rank.push_back({0,e});
++    require(src.pin_cache_complement(cache,err,true,{},-1,0,2*bytes,&rank),err);
++    require(src.pinned(0,0),"expert 0 is not in the pinned RAM copy");
++    int dev=0;cudaGetDevice(&dev);
++    ForesightSwap fs;
++    require(fs.init(1,1,5,{0},{dev},err),err);
++    fs.verify=true;
++    src.set_foresight_swap(&fs);
++    fs.note_miss(&src,0,0);                                       // expert 0 -> the slot, copied from its RAM place
++    std::this_thread::sleep_for(std::chrono::milliseconds(200));  // let the copy land; take() is not called yet
++    std::vector<int32_t> gpu{-1,-1,0,1,-1};std::vector<float> heat{0,1,1000,1000,30};
++    require(src.rebalance_ram(gpu,heat,1)==1,"one hot file blob must replace expert 0's RAM place");
++    require(std::memcmp(src.resident_blob(0,4),truth[4].data(),bytes)==0,"promoted bytes corrupted");
++    unsigned long long ptr=0;
++    const bool served=fs.take(0,0,ptr);
++    require(!served,"a Foresight slot copied from a rebalanced RAM place was served");
++    require(fs.verify_bad==0,"verify found a slot whose source bytes were rewritten under it");
++    src.set_foresight_swap(nullptr);
++    std::cout<<"foresight rebalance: dropped "<<fs.dropped<<", "<<fs.report()<<": PASS\n";
++    src.close();
++}
++
+ }  // namespace
+ 
+ int main(int argc, char** argv) {
+     try {
++        if(argc==2 && std::string(argv[1])=="--ram-rebalance-gpu"){test_ram_rebalance();std::cout<<"RAM rebalance integrity: PASS\n";test_foresight_rebalance();return 0;}
+         test_complement_plan();
+         test_resident_lend_region();
+         test_split_lend_regions();
+diff --git a/tools/check_isa_guard.py b/tools/check_isa_guard.py
+index 83cd18f1bf928bdb4734f304e53444f83fcc0a37..9d62c09a10e92c017f9a33d24d725862f325c1a6 100644
+--- a/tools/check_isa_guard.py
++++ b/tools/check_isa_guard.py
+@@ -31,6 +31,7 @@ import sys
+ # (cpu_avx512_ok / cpu_avxvnni_ok), or reaches them only after cpu_require_expert_support().
+ WIDE_PUBLIC = {
+     "nvfp4_512_gu_rows", "nvfp4_512_rows",   # NVFP4 (native_expert.cpp: both behind cpu_avx512_ok())
++    "tq_rows_avx512",   # APR trellis rows (tq_cpu.cpp: tq_isa() picks AVX-512 only behind cpu_avx512_ok())
+     "act_quant_q8_1", "q2_0_gguf_rows_multi", "s2_expert_vnni", "s2_expert_vnni_q", "s2_expert_gu_rows",
+     "s2_expert_down_rows", "s2_expert_gu_rows_multi", "s2_expert_down_rows_multi", "s2_expert_vnni_multi",
+     "s2_expert_scalar", "iq512_gu_rows", "iq512_rows", "iq256_gu_rows", "iq256_rows", "iq256_gu_rows_v",
+@@ -45,7 +46,7 @@ WIDE_OBJECTS = ("expert.cpp", "iq_avx512.cpp", "iq_avx2.cpp", "q2_avx2.cpp", "kq
+ # built a table in a constructor, the compiler used AVX/FMA for it, and a Westmere / Sandy Bridge Xeon died with an
+ # illegal instruction before main, with nothing in the log).  The initialisers must not exist: constexpr tables, or
+ # function-local statics read behind the CPU check.
+-INIT_FREE_OBJECTS = WIDE_OBJECTS + ("nvfp4_avx2.cpp", "kq_avx1.cpp", "q2_avx1.cpp", "iq_avx1.cpp")
++INIT_FREE_OBJECTS = WIDE_OBJECTS + ("nvfp4_avx2.cpp", "kq_avx1.cpp", "q2_avx1.cpp", "iq_avx1.cpp", "tq_avx2.cpp")
+ 
+ # An instruction is "wide" if it is EVEX encoded (first byte 0x62 in 64-bit mode), or one of these VEX / legacy
+ # extensions that an AVX2 CPU may lack.  AVX-VNNI is VEX encoded (vpdpbusd, vpdpwssd ...).
